@@ -80,6 +80,7 @@ Actions 自带 `GITHUB_REPOSITORY`，`vite.config.ts` 把它折成 `__REPO_URL__
 - 单测：455 个用例全绿，`tsc --noEmit` 0 错误；
 - APK SHA-256：932D749B52F69871251F0CF588DC37BDB0AFC13FAD100B1508DF83357B668539（9.21 MB，Windows Defender 扫描 `found no threats`）。
 - 说明：上面的哈希对应本机签名的包；同一个 tag 由 Actions 重新打包时，Gradle 产出的 APK 不保证字节一致，以实际下载到的包为准（签名与版本号始终一致）。
+- 发布资源名：GitHub 会把发布资源名里的非 ASCII 字符去掉（`课表助手-v1.4.0.apk` → `-v1.4.0.apk`），所以 Release 里的附件名用 ASCII 的 `timetable-app-v1.4.0.apk`；本机产出的文件名仍是中文的，两者是同一个包（哈希相同）。
 
 ---
 ## v1.3.0
