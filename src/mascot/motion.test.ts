@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   ALL_BEHAVIORS, ALL_REACTIONS, BEHAVIORS, BLINK_MAX_MS, BLINK_MIN_MS, REACT_MS, REACTIONS,
-  SLEEP_AFTER_MS, advance, assetFor, assetKeyFor, behaviorWeights, blinkDelayFor, energyOf,
+  SELF_REACTIONS, SLEEP_AFTER_MS, advance, assetFor, assetKeyFor, behaviorWeights, blinkDelayFor, energyOf,
   initialRuntime, motionVars, nextWakeAt, pickWeighted, poke, rollBehavior, rollReaction, touch,
 } from './motion';
 import { MASCOT_STATES } from './types';
@@ -230,19 +230,20 @@ describe('来回走走', function () {
     }
   });
 
-  it('★ 睡着之后不会踱步（睡眠里挑动作也挑不到它）', function () {
+  it('★ 睡着的时候一次都不会踱步（走只属于醒着的那一小段）', function () {
     const rng = seeded(61);
     let rt = initialRuntime(T0, rng);
     rt = advance(rt, T0 + SLEEP_AFTER_MS, false, { rng: rng });
     expect(rt.phase).toBe('sleep');
-    /* 睡着后连续推 200 次，一次都不该出现"走走" */
     let now = T0 + SLEEP_AFTER_MS;
+    let walkWhileAsleep = 0;
     for (let i = 0; i < 200; i++) {
-      rt = advance(rt, now, false, { energy: 0.8, rng: rng });
-      expect(rt.behavior).not.toBe('walk');
+      rt = advance(rt, now, false, { energy: 0.8, rng: rng, allowWalk: true });
+      /* 判据是"睡着的那一刻不许出现走走" —— 半醒那一小段是可以走的 */
+      if (rt.phase === 'sleep' && rt.behavior === 'walk') walkWhileAsleep++;
       now = nextWakeAt(rt, { sleepAfterMs: 45000 });
-      if (rt.phase !== 'sleep') break;
     }
+    expect(walkWhileAsleep).toBe(0);
   });
 
   it('允许走时，长时间运行里会出现走走', function () {
@@ -432,6 +433,182 @@ describe('动画参数', function () {
       expect(parseFloat(v['--m-bob'])).toBe(0);
       expect(v['--m-sway']).toBe('0.00deg');
     }
+  });
+});
+
+describe('打盹循环（久等也不会卡在同一个动画上）', function () {
+  /** 压缩过的节奏：睡 3–4 秒 → 醒 2–3 秒。正常是 45–150 / 4–14 秒 */
+  const FAST = {
+    sleepAfterMs: 5000,
+    stirMs: { min: 3000, max: 4000 },
+    wakeMs: { min: 2000, max: 3000 },
+    allowWalk: true,
+  };
+
+  it('★ 睡着之后会隔一阵子醒一小段，再打哈欠睡回去（一轮一轮地来回）', function () {
+    const rng = seeded(70);
+    let rt = initialRuntime(T0, rng);
+    let now = T0;
+    const phases: string[] = [];
+    let backToSleepWithYawn = 0;
+    for (let i = 0; i < 400; i++) {
+      const wasStir = rt.phase === 'idle' && (rt.stirUntil || 0) > 0;
+      const opts = Object.assign({ energy: 0.25, rng: rng }, FAST);
+      rt = advance(rt, now, false, opts);
+      if (phases[phases.length - 1] !== rt.phase) phases.push(rt.phase);
+      /* 从半醒睡回去的那一下，必须是"睡着 + 打哈欠" */
+      if (wasStir && rt.phase === 'sleep' && rt.behavior === 'yawn') backToSleepWithYawn++;
+      now = nextWakeAt(rt, Object.assign({ energy: 0.25, rng: rng }, FAST));
+    }
+    const sleeps = phases.filter(function (p) { return p === 'sleep'; }).length;
+    /* 睡 → 醒 → 睡 至少来回好几轮，而不是一睡不醒 */
+    expect(sleeps).toBeGreaterThanOrEqual(3);
+    expect(phases.indexOf('idle')).toBeGreaterThanOrEqual(0);
+    expect(backToSleepWithYawn).toBeGreaterThanOrEqual(2);
+  });
+
+  it('★ 半醒那一小段走的是"醒着"的动作池（会出现走动 / 张望 / 点头，而不是清一色呼吸）', function () {
+    const rng = seeded(71);
+    let rt = initialRuntime(T0, rng);
+    let now = T0;
+    const duringStir = new Set<MascotBehavior>();
+    let walkOutsideSleep = 0;
+    for (let i = 0; i < 500; i++) {
+      const opts = Object.assign({ energy: 0.2, rng: rng }, FAST);
+      rt = advance(rt, now, false, opts);
+      if (rt.phase !== 'sleep' && (rt.stirUntil || 0) > 0) duringStir.add(rt.behavior);
+      if (rt.phase !== 'sleep' && rt.behavior === 'walk') walkOutsideSleep++;
+      now = nextWakeAt(rt, opts);
+    }
+    /* 半醒时不该只有"呼吸"一种 —— 至少三种动作，且不含睡眠专属的哈欠堆叠 */
+    expect(duringStir.size).toBeGreaterThanOrEqual(3);
+    /* 能量只有 0.2（十几分钟没人理），半醒时仍然走起来了 —— 靠的是"刚醒"的精神头 */
+    expect(walkOutsideSleep).toBeGreaterThan(0);
+  });
+
+  it('半醒结束的时刻排在"睡回去"上，睡着时排在"醒一下"上', function () {
+    const rng = seeded(72);
+    let rt = initialRuntime(T0, rng);
+    let now = T0;
+    let sawStir = false;
+    let sawSleepSchedule = false;
+    for (let i = 0; i < 300; i++) {
+      const opts = Object.assign({ energy: 0.5, rng: rng }, FAST);
+      rt = advance(rt, now, false, opts);
+      const wake = nextWakeAt(rt, opts);
+      /*
+       * 三条不变量（不去复述实现，只钉住"不能怎样"）：
+       *   1. 不会排在过去 —— 排到过去就等于紧循环空转；
+       *   2. 睡着时一定会被叫醒去"动一下"；
+       *   3. 半醒时一定会被叫醒去睡回去。
+       */
+      expect(wake).toBeGreaterThanOrEqual(now);
+      expect(wake - now).toBeLessThanOrEqual(5 * 60 * 1000);
+      if (rt.phase === 'sleep') {
+        expect((rt.nextStirAt || 0)).toBeGreaterThan(0);
+        expect(wake).toBeLessThanOrEqual(rt.nextStirAt);
+        sawSleepSchedule = true;
+      } else if ((rt.stirUntil || 0) > 0) {
+        expect(wake).toBeLessThanOrEqual(rt.stirUntil);
+        sawStir = true;
+      }
+      now = wake;
+    }
+    expect(sawSleepSchedule).toBe(true);
+    expect(sawStir).toBe(true);
+  });
+
+  it('人一碰就打盹循环清空：半醒取消、下一次"醒一下"重排', function () {
+    const rng = seeded(73);
+    let rt = initialRuntime(T0, rng);
+    rt = advance(rt, T0 + SLEEP_AFTER_MS, false, { rng: rng });
+    expect(rt.nextStirAt).toBeGreaterThan(0);
+    const woke = touch(rt, T0 + SLEEP_AFTER_MS + 1000);
+    expect(woke.stirUntil).toBe(0);
+    expect(woke.nextStirAt).toBe(0);
+    expect(woke.phase).toBe('idle');
+    /* 被点也一样 */
+    const poked = poke(rt, T0 + SLEEP_AFTER_MS + 1000, seeded(74));
+    expect(poked.stirUntil).toBe(0);
+  });
+});
+
+describe('自发小动作（没人点也会自己动一下）', function () {
+  it('★ 长时间没人理也会零星播反应，而且绝不会是"被吓一跳"', function () {
+    const rng = seeded(80);
+    let rt = initialRuntime(T0, rng);
+    let now = T0;
+    const kinds = new Set<string>();
+    let total = 0;
+    for (let i = 0; i < 400; i++) {
+      const before = rt.reaction;
+      rt = advance(rt, now, false, { energy: 0.6, rng: rng, allowWalk: true });
+      if (rt.reaction && rt.reaction !== before) {
+        total++;
+        kinds.add(rt.reaction);
+        /* 自发动作只从 SELF_REACTIONS 里挑 */
+        expect(SELF_REACTIONS).toContain(rt.reaction);
+      }
+      now = nextWakeAt(rt, { sleepAfterMs: SLEEP_AFTER_MS });
+    }
+    expect(total).toBeGreaterThanOrEqual(3);
+    expect(kinds.has('startle')).toBe(false);
+  });
+
+  it('已经在播反应时不会叠加第二个（两段 transform 动画会互相抢）', function () {
+    const rng = seeded(81);
+    const poked = poke(initialRuntime(T0, rng), T0, seeded(82));
+    const next = advance(poked, poked.behaviorUntil + 1, false, { rng: rng, energy: 1 });
+    /* 反应还没播完，动作即使换了一个也不该塞进新的自发反应 */
+    if (next.reaction && poked.reactionUntil > poked.behaviorUntil + 1) {
+      expect(next.reaction).toBe(poked.reaction);
+    }
+  });
+
+  it('反应序号会往前走（界面靠它可靠地重启动画）', function () {
+    const rng = seeded(83);
+    const rt0 = initialRuntime(T0, rng);
+    const poked = poke(rt0, T0, seeded(84));
+    expect(poked.reactionSeq).toBe(rt0.reactionSeq + 1);
+  });
+});
+
+describe('新增的微动作', function () {
+  it('张望 / 点头进了动作池，并且会被掷到', function () {
+    expect(ALL_BEHAVIORS).toContain('look');
+    expect(ALL_BEHAVIORS).toContain('nod');
+    const rng = seeded(90);
+    let recent: MascotBehavior[] = [];
+    const seen = new Set<MascotBehavior>();
+    for (let i = 0; i < 400; i++) {
+      const r = rollBehavior(0.6, recent, rng);
+      seen.add(r.behavior);
+      recent = [r.behavior].concat(recent).slice(0, 2);
+    }
+    expect(seen.has('look')).toBe(true);
+    expect(seen.has('nod')).toBe(true);
+  });
+
+  it('★ 配比让"点头"与"张望"落在不同的通道上（不是同一个动作换速度）', function () {
+    const baseBob = parseFloat(motionVars(MOTION, 'idle', 'breathe', NO_JITTER, false)['--m-bob']);
+    const baseSway = parseFloat(motionVars(MOTION, 'idle', 'breathe', NO_JITTER, false)['--m-sway']);
+    const nod = motionVars(MOTION, 'idle', 'nod', NO_JITTER, false);
+    const look = motionVars(MOTION, 'idle', 'look', NO_JITTER, false);
+    /* 同一条通道横向比：点头的上下更多，张望的左右更多 */
+    expect(parseFloat(nod['--m-bob']) / baseBob).toBeGreaterThan(parseFloat(look['--m-bob']) / baseBob);
+    expect(parseFloat(look['--m-sway']) / baseSway).toBeGreaterThan(parseFloat(nod['--m-sway']) / baseSway);
+  });
+
+  it('睡着了挑不到"张望 / 点头"这类醒着才有的动作（权重为 0 或极低）', function () {
+    const rng = seeded(91);
+    let recent: MascotBehavior[] = [];
+    let awakeish = 0;
+    for (let i = 0; i < 300; i++) {
+      const r = rollBehavior(0.8, recent, rng, { dozing: true, allowWalk: false });
+      if (r.behavior === 'look' || r.behavior === 'nod' || r.behavior === 'walk') awakeish++;
+      recent = [r.behavior].concat(recent).slice(0, 2);
+    }
+    expect(awakeish / 300).toBeLessThan(0.2);
   });
 });
 

@@ -12,6 +12,7 @@ import {
   parseMascotFileText, validateMascotPack,
 } from '../mascot/pack';
 import { MASCOT_STATES, clampHeight, type MascotPack } from '../mascot/types';
+import { prewarmMascotAssets } from '../mascot/prewarm';
 import { scanSheetCells } from '../theme/videoSheet';
 import { migrateData } from '../core/migrate';
 import { exportIcs, importIcs } from '../core/ics';
@@ -1164,6 +1165,11 @@ function applyMascot(pack: MascotPack | null, hidden?: boolean): void {
   const oldKeys = collectMascotKeys(state.mascot);
   setState({ mascot: pack });
   const keep = persistMascot(pack);
+  /*
+   * 素材预热放在落盘之后，而且它自己会一张一张地让出主线程
+   * （见 mascot/prewarm.ts）—— 换角色、用别人的云端角色都不会再"顿一下"。
+   */
+  prewarmMascotAssets(pack);
   for (const k of oldKeys) {
     if (keep.indexOf(k) < 0) deleteAsset(k);
   }
@@ -1190,6 +1196,24 @@ export function hydrateMascotIntoState(): void {
     return;
   }
   setState({ mascot: next });
+}
+
+/**
+ * 装上**已经是对象**的角色包（云端下载走这条路）。
+ *
+ * 为什么不复用 importMascotPack：那条路要一段文本，而云端拿到的是解析好的对象 ——
+ * 为了走同一个入口就 JSON.stringify 成字符串、再 JSON.parse 回来，
+ * 几 MB 的包白转两趟。校验没有省：fetchMascot 里已经跑过 validateMascotPack，
+ * 这里拿到的是规范化之后的对象。
+ */
+export function importMascotPackObject(
+  pack: MascotPack, sourceName?: string, warnings?: string[]
+): { ok: boolean; error?: string; warnings: string[] } {
+  const named = sourceName && pack.name === '未命名角色'
+    ? Object.assign({}, pack, { name: sourceName })
+    : pack;
+  applyMascot(named, false);
+  return { ok: true, warnings: warnings || [] };
 }
 
 /** 导入一个角色包（文本形式）。返回结果由界面负责提示 */
@@ -1468,7 +1492,18 @@ export interface CloudState {
   /** 云端角色：自己的 + 别人公开的（按 user_id 区分） */
   mascots: CloudMascot[];
   mascotsLoaded: boolean;
-  mascotsBusy: boolean;
+  /**
+   * 云端角色正在干什么。空串 = 闲。
+   *
+   * 以前这里是个 boolean，界面只能显示一个"…" —— 传 3 MB 的角色包时
+   * 用户完全不知道它在下载还是在存盘、还是已经卡死了。现在分工写清楚：
+   *   list     正在拉列表（打开面板）
+   *   download 正在下载角色包
+   *   save     正在写进本机（几 MB 的解码与落盘，主线程会被占住一小会儿）
+   *   upload   正在上传
+   *   delete   正在删除
+   */
+  mascotsStage: '' | 'list' | 'download' | 'save' | 'upload' | 'delete';
   mascotsError: string;
   quota: MascotQuota | null;
 }
@@ -1497,7 +1532,7 @@ function initialCloud(autoLogin: boolean): CloudState {
     session: restored, busy: '', error: '', notice: '', backup: null, syncAsk: false, passwordSheet: false, linkType: '',
     /* ?open=cloud：开发与无头检查用，直接把云弹层打开 */
     sheet: openParam() === 'cloud',
-    mascots: [], mascotsLoaded: false, mascotsBusy: false, mascotsError: '', quota: null,
+    mascots: [], mascotsLoaded: false, mascotsStage: '', mascotsError: '', quota: null,
   };
   let link = null;
   try { link = parseAuthLink(window.location.hash, window.location.search); } catch (e) { link = null; }
@@ -1844,6 +1879,13 @@ export function openCloudSheet(): void {
   void cloudLoadMascots();
 }
 
+/** 上一次把角色列表拉回来的时刻（成功才算） */
+let mascotsAt = 0;
+/** 正在进行中的那次拉取 —— 打开面板时有两个入口都会调它，去重靠这个 */
+let mascotsInFlight: Promise<void> | null = null;
+/** 这么短的时间里重复打开面板，直接用手上这份，不再问服务器 */
+const MASCOTS_TTL_MS = 60 * 1000;
+
 export function closeCloudSheet(): void {
   setCloud({ sheet: false });
 }
@@ -1854,21 +1896,49 @@ export function closeCloudSheet(): void {
  * 没登录也能拉：公开的角色对所有人可见（"把设计公开给别人用"就是这个意思），
  * 所以这里传的是"当前令牌（可能为空）"。
  */
-export async function cloudLoadMascots(): Promise<void> {
+export async function cloudLoadMascots(force?: boolean): Promise<void> {
   if (!cloudConfigured()) return;
-  setCloud({ mascotsBusy: true, mascotsError: '' });
-  try {
-    let token: string | null = null;
-    if (state.cloud.session) {
-      try { token = await cloudToken(); } catch (e) { token = null; }
+  /*
+   * 三个"不要白等"的决定，都是被"打开云端角色很卡"逼出来的：
+   *
+   *   1. **并发去重**：打开弹层时 openCloudSheet 和面板挂载各会调一次，
+   *      以前就是两次完整的往返（用户看到按钮一直灰着）；
+   *   2. **刚拉过就不再拉**：一分钟内重复打开面板直接用手上这份，想强制刷新有「刷新」按钮；
+   *   3. **已经有数据时静默刷新**：不在界面锁上转圈，新数据回来了直接替换。
+   *
+   * 请求本身也从"串行四次"压成"并行一次"：列表与配额同时发，
+   * 配额内部那两条（读 profiles + 数自己的行数）也是并行的。
+   */
+  if (mascotsInFlight) return mascotsInFlight;
+  if (!force && state.cloud.mascotsLoaded && Date.now() - mascotsAt < MASCOTS_TTL_MS) return;
+
+  const quiet = state.cloud.mascotsLoaded;
+  mascotsInFlight = (async function (): Promise<void> {
+    if (!quiet) setCloud({ mascotsStage: 'list', mascotsError: '' });
+    try {
+      let token: string | null = null;
+      if (state.cloud.session) {
+        try { token = await cloudToken(); } catch (e) { token = null; }
+      }
+      const both = await Promise.all([
+        listMascots(token),
+        token ? myQuota(token).catch(function () { return null; }) : Promise.resolve(null),
+      ]);
+      mascotsAt = Date.now();
+      setCloud({
+        mascots: both[0],
+        mascotsLoaded: true,
+        mascotsStage: '',
+        quota: both[1] || state.cloud.quota,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setCloud({ mascotsStage: '', mascotsLoaded: true, mascotsError: msg });
+    } finally {
+      mascotsInFlight = null;
     }
-    const list = await listMascots(token);
-    const q = token ? await myQuota(token).catch(function () { return null; }) : null;
-    setCloud({ mascots: list, mascotsLoaded: true, mascotsBusy: false, quota: q || state.cloud.quota });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    setCloud({ mascotsBusy: false, mascotsLoaded: true, mascotsError: msg });
-  }
+  })();
+  return mascotsInFlight;
 }
 
 /** 把本机当前的角色传到云端 */
@@ -1883,17 +1953,17 @@ export async function cloudUploadMascot(name: string, isPublic: boolean): Promis
     setCloud({ mascotsError: '云端角色已经 ' + q.used + ' / ' + q.limit + '：先在列表里删掉一个再传' });
     return false;
   }
-  setCloud({ mascotsBusy: true, mascotsError: '' });
+  setCloud({ mascotsStage: 'upload', mascotsError: '' });
   try {
     const token = await cloudToken();
     const row = await uploadMascot(token, s.user.id, pack, name || pack.name || '未命名角色', isPublic);
-    await cloudLoadMascots();
-    setCloud({ mascotsBusy: false });
+    await cloudLoadMascots(true);
+    setCloud({ mascotsStage: '' });
     showToast('已上传到云端：' + row.name + (isPublic ? '（已公开）' : ''), 'ok');
     return true;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    setCloud({ mascotsBusy: false, mascotsError: msg });
+    setCloud({ mascotsStage: '', mascotsError: msg });
     showToast(msg, 'error');
     return false;
   }
@@ -1915,7 +1985,7 @@ export async function cloudUseMascot(m: CloudMascot): Promise<void> {
     );
     if (!ok) return;
   }
-  setCloud({ mascotsBusy: true, mascotsError: '' });
+  setCloud({ mascotsStage: 'download', mascotsError: '' });
   try {
     let token: string | null = null;
     if (state.cloud.session) { try { token = await cloudToken(); } catch (e) { token = null; } }
@@ -1923,15 +1993,39 @@ export async function cloudUseMascot(m: CloudMascot): Promise<void> {
     if (!r.ok || !r.pack) {
       throw new Error(r.errors.join('；') || '这个角色包读不出来');
     }
-    const applied = importMascotPack(JSON.stringify(r.pack), m.name);
+    /*
+     * 先让"正在保存"这一帧画出来，再干重活。
+     *
+     * 接下来这一段是同步的：解析几 MB 的 JSON、把每张图哈希一遍、写进本机。
+     * 一口气做下来的话，用户看到的是"下载中"直接卡住然后突然结束 ——
+     * 中间那一两秒没有任何反馈，看起来就像死了。让出一帧只花 ~16ms。
+     */
+    setCloud({ mascotsStage: 'save' });
+    await nextPaint();
+    /* 直接把校验好的对象装上：不再序列化一遍（见 importMascotPackObject） */
+    const applied = importMascotPackObject(r.pack, m.name, r.warnings);
     if (!applied.ok) throw new Error(applied.error || '这个角色包用不了');
-    setCloud({ mascotsBusy: false, sheet: false });
+    setCloud({ mascotsStage: '', sheet: false });
     showToast('已用上「' + m.name + '」' + (applied.warnings.length ? '（' + applied.warnings.length + ' 条提示）' : ''), 'ok');
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    setCloud({ mascotsBusy: false, mascotsError: msg });
+    setCloud({ mascotsStage: '', mascotsError: msg });
     showToast(msg, 'error');
   }
+}
+
+/**
+ * 让出一帧，等界面把它画完。
+ *
+ * rAF 之后再加一个宏任务：rAF 的回调跑在"绘制之前"，
+ * 只等 rAF 的话重活仍可能抢在这一次绘制前面。
+ */
+function nextPaint(): Promise<void> {
+  return new Promise(function (resolve) {
+    const raf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : null;
+    if (!raf) { setTimeout(resolve, 0); return; }
+    raf(function () { setTimeout(resolve, 0); });
+  });
 }
 
 export async function cloudSetMascotPublic(m: CloudMascot, isPublic: boolean): Promise<void> {
@@ -1956,16 +2050,16 @@ export async function cloudDeleteMascot(m: CloudMascot): Promise<void> {
   if (!cloudConfigured() || !s) return;
   const ok = await confirmDanger('删除云端的「' + m.name + '」？删掉之后这个角色在云端就没有了（本机正在用的那个不受影响）。', '删除');
   if (!ok) return;
-  setCloud({ mascotsBusy: true, mascotsError: '' });
+  setCloud({ mascotsStage: 'delete', mascotsError: '' });
   try {
     const token = await cloudToken();
     await deleteCloudMascot(token, m);
-    setCloud({ mascots: state.cloud.mascots.filter(function (x) { return x.id !== m.id; }), mascotsBusy: false });
-    void cloudLoadMascots();
+    setCloud({ mascots: state.cloud.mascots.filter(function (x) { return x.id !== m.id; }), mascotsStage: '' });
+    void cloudLoadMascots(true);
     showToast('已从云端删除', 'ok');
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    setCloud({ mascotsBusy: false, mascotsError: msg });
+    setCloud({ mascotsStage: '', mascotsError: msg });
     showToast(msg, 'error');
   }
 }

@@ -1,7 +1,11 @@
 import { CloudError, cloudRequest } from './client';
 import { getAsset } from '../storage';
-import { collectMascotKeys, hydrateMascot, mascotFileText, parseMascotFileText, type ValidateMascotResult } from '../mascot/pack';
-import type { MascotPack } from '../mascot/types';
+import { assetKey, isAssetRef } from '../storage/assetRef';
+import {
+  collectMascotKeys, hydrateMascot, mascotFileText, parseMascotFileText, validateMascotPack,
+  type ValidateMascotResult,
+} from '../mascot/pack';
+import { MASCOT_STATES, type MascotPack } from '../mascot/types';
 
 /**
  * 云端角色。
@@ -72,18 +76,57 @@ export function prepareMascotUpload(pack: MascotPack): { text: string; bytes: nu
   return { text: out.text, bytes: out.bytes, missingAssets: missing || out.hasRefs };
 }
 
+/**
+ * 估算这个角色包上传后有多大 —— **不序列化，只做加法**。
+ *
+ * 为什么不用 `prepareMascotUpload` 去量：那一步会把整包还原成自包含 JSON
+ * 再转成一个大字符串，几 MB 的活儿；而它以前是**打开云端面板时同步跑的** ——
+ * 面板一打开就顿一下，正是"加载云端角色很卡"的一部分。
+ *
+ * 口径要和真值对齐：`mascotFileText` 报的 bytes 其实是**字符数**（正文以 base64 为主，
+ * 全是 ASCII，字符数与字节数几乎相等），这里就照同一个口径累加，
+ * 于是"面板上显示的体积"和"上传时判定的体积"是同一个数。
+ *
+ * 真正的上限判定仍在 `uploadMascot` 里用精确值做 —— 这里只负责"提前告诉你大概多大"。
+ */
+export function estimateMascotBytes(pack: MascotPack): { bytes: number; missingAssets: boolean } {
+  let bytes = 0;
+  let missing = false;
+  for (const key of MASCOT_STATES) {
+    const a = pack.states[key];
+    if (!a || !a.src) continue;
+    if (isAssetRef(a.src)) {
+      const uri = getAsset(assetKey(a.src));
+      if (uri === null) { missing = true; continue; }
+      bytes += uri.length;
+    } else if (a.src.indexOf('data:') === 0) {
+      bytes += a.src.length;
+    }
+  }
+  /* JSON 外壳（格式头、字段名、缩进）固定几十到几百字节，按 512 算足够准 */
+  return { bytes: bytes + 512, missingAssets: missing };
+}
+
 export async function listMascots(token: string | null): Promise<CloudMascot[]> {
   const q = '/rest/v1/mascots?select=id,user_id,name,is_public,path,size_bytes,created_at,updated_at&order=created_at.desc&limit=60';
   const json = await cloudRequest('GET', q, token ? { token: token } : {});
   return Array.isArray(json) ? (json as CloudMascot[]) : [];
 }
 
+/**
+ * 配额：有没有"不限量"、已经用了几个。
+ *
+ * 两条查询**并行发**（以前是一条等一条，白白多一个来回）——
+ * 这个函数是"打开云端面板"这条路上的一环，一个来回就是几百毫秒。
+ */
 export async function myQuota(token: string): Promise<MascotQuota> {
-  const json = await cloudRequest('GET', '/rest/v1/profiles?select=unlimited_mascots&limit=1', { token: token });
-  const rows = Array.isArray(json) ? (json as { unlimited_mascots?: boolean }[]) : [];
+  const both = await Promise.all([
+    cloudRequest('GET', '/rest/v1/profiles?select=unlimited_mascots&limit=1', { token: token }),
+    cloudRequest('GET', '/rest/v1/mascots?select=id&limit=100', { token: token }),
+  ]);
+  const rows = Array.isArray(both[0]) ? (both[0] as { unlimited_mascots?: boolean }[]) : [];
   const unlimited = !!(rows[0] && rows[0].unlimited_mascots);
-  const mine = await cloudRequest('GET', '/rest/v1/mascots?select=id&limit=100', { token: token });
-  const used = Array.isArray(mine) ? mine.length : 0;
+  const used = Array.isArray(both[1]) ? both[1].length : 0;
   return { used: used, unlimited: unlimited, limit: 2 };
 }
 
@@ -143,14 +186,21 @@ export async function uploadMascot(
   }
 }
 
-/** 取回一个角色包（自己的或公开的都能取；权限由 Storage 的策略判定） */
+/**
+ * 取回一个角色包（自己的或公开的都能取；权限由 Storage 的策略判定）。
+ *
+ * 注意这里**不再把响应序列化一遍**：客户端已经把正文解析成对象了，
+ * 以前无论哪种情况都走 "JSON.stringify → 再 JSON.parse" ——
+ * 一个 8 MB 的包白转两趟（还有一份几十 MB 的中间字符串），
+ * 手机上一眼就能看出那两下卡顿。对象就直接校验，只有真回了一段文本才解析。
+ */
 export async function fetchMascot(token: string | null, path: string): Promise<ValidateMascotResult> {
   const json = await cloudRequest('GET', '/storage/v1/object/' + MASCOTS_BUCKET + '/' + encodeURIComponent(path).replace(/%2F/g, '/'), {
     token: token || undefined,
     timeoutMs: 180000,
   });
-  const text = typeof json === 'string' ? json : JSON.stringify(json);
-  return parseMascotFileText(text);
+  if (typeof json === 'string') return parseMascotFileText(json);
+  return validateMascotPack(json);
 }
 
 export async function setMascotPublic(token: string, id: string, isPublic: boolean): Promise<void> {

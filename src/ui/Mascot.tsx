@@ -1,6 +1,7 @@
 import React from 'react';
 import { openManual, patchMascotPrefs, resetMascotPosition, setTab, showToast, useApp } from '../app/store';
 import {
+  STIR_MAX_MS, STIR_MIN_MS, STIR_WAKE_MAX_MS, STIR_WAKE_MIN_MS,
   advance, assetKeyFor, energyOf, initialRuntime, nextWakeAt, poke, touch, type MascotPhase,
 } from '../mascot/motion';
 
@@ -44,6 +45,43 @@ const INTERACTION_WINDOW_MS = 3 * 60 * 1000;
 const FALLBACK_INSETS: Insets = { top: 96, bottom: 60 };
 
 /**
+ * 检查用的打盹快进：`?doze=<秒>`。
+ *
+ * 正常的打盹节奏是"睡 45–150 秒 → 醒 4–14 秒"，一条 60 秒的自检最多只等到一轮。
+ * 传了这个参数之后：多久算睡着 = 参数秒数，醒与睡那两段按同一比例压短 ——
+ * 于是 "睡 → 醒 → 走两步 → 打哈欠 → 再睡" 这条路径在无头浏览器里也能验。
+ * 不带参数时它返回 null，正常节奏一个字节都不改。
+ */
+interface DozeDev {
+  sleepAfterMs: number;
+  stirMs: { min: number; max: number };
+  wakeMs: { min: number; max: number };
+}
+
+function readDozeDev(): DozeDev | null {
+  try {
+    const raw = new URLSearchParams(window.location.search).get('doze');
+    const sec = raw === null ? NaN : Number(raw);
+    if (!isFinite(sec) || sec <= 0) return null;
+    /* 以 60 秒为基准缩放：doze=6 就是"睡 6 秒"，睡/醒两段缩到十分之一 */
+    const f = Math.max(0.03, Math.min(1, sec / 60));
+    return {
+      sleepAfterMs: Math.max(3000, Math.round(sec * 1000)),
+      stirMs: {
+        min: Math.max(1000, Math.round(STIR_MIN_MS * f)),
+        max: Math.max(1200, Math.round(STIR_MAX_MS * f)),
+      },
+      wakeMs: {
+        min: Math.max(1500, Math.round(STIR_WAKE_MIN_MS * Math.max(0.4, f))),
+        max: Math.max(2000, Math.round(STIR_WAKE_MAX_MS * Math.max(0.4, f))),
+      },
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
  * 锚点离可用区域边缘的余量。
  *
  * 只留 6px：角色可以一半挂在屏幕外，但"落脚点"要留在能按住的地方。
@@ -66,6 +104,9 @@ export default function MascotOverlay() {
   /** 最近几次互动的时刻，用来算"刚被逗过，更活泼一点" */
   const interactionsRef = React.useRef<number[]>([]);
 
+  /** 打盹快进的参数（只有带 ?doze= 时才有值，见 readDozeDev） */
+  const dozeDev = React.useMemo(function () { return readDozeDev(); }, []);
+
   const [rt, setRt] = React.useState(function () { return initialRuntime(Date.now(), rngRef.current); });
   const [dragging, setDragging] = React.useState(false);
   const [reduced, setReduced] = React.useState(false);
@@ -77,7 +118,11 @@ export default function MascotOverlay() {
   });
   const [clock, setClock] = React.useState(function () { return Date.now(); });
 
-  /** 反应序号：每次被点 +1，让"同一种反应连着两次"也能重新播动画 */
+  /*
+   * 反应序号：每次被点 +1，让"同一种反应连着两次"也能重新播动画。
+   * 自发小动作（没人点也会蹦一下）走的是状态机里那个 reactionSeq ——
+   * 两个加起来传给画图那一层，任何一路发起反应都能可靠地重启动画。
+   */
   const [reactionSeq, setReactionSeq] = React.useState(0);
   /*
    * 角色的最外层节点。
@@ -202,8 +247,13 @@ export default function MascotOverlay() {
       interactions: interactions,
     });
 
-    return { soon: soon, sleepAfterMs: sleepy ? 45000 : undefined, energy: energy };
-  }, [clock, s.data, rt.lastTouch]);
+    return {
+      soon: soon,
+      /* 快进参数优先，其次才是"深夜早睡" */
+      sleepAfterMs: dozeDev ? dozeDev.sleepAfterMs : (sleepy ? 45000 : undefined),
+      energy: energy,
+    };
+  }, [clock, s.data, rt.lastTouch, dozeDev]);
 
   /*
    * 状态机：**排到下一个该发生变化的时刻再醒来**，而不是每 400ms 轮询一次。
@@ -218,22 +268,26 @@ export default function MascotOverlay() {
     let timer: number | null = null;
     const step = function (): void {
       const now = Date.now();
-      const next = advance(rt, now, dragRef.current.active, {
+      const opts = {
         sleepAfterMs: mood.sleepAfterMs,
         energy: mood.energy,
         rng: rngRef.current,
         /* 贴边站着（没有横向空间）时不要让状态机挑到"走走" */
         allowWalk: !!walkRoomRef.current,
-      });
+        /* 检查用：把"睡 → 醒 → 睡"的节奏压短（不带 ?doze= 时这两个字段是 undefined） */
+        stirMs: dozeDev ? dozeDev.stirMs : undefined,
+        wakeMs: dozeDev ? dozeDev.wakeMs : undefined,
+      };
+      const next = advance(rt, now, dragRef.current.active, opts);
       if (next !== rt) setRt(next);
-      const wake = nextWakeAt(next, { sleepAfterMs: mood.sleepAfterMs });
+      const wake = nextWakeAt(next, opts);
       /* 至少 120ms 之后再醒：防抖，也免得状态机把自己饿死在一个紧循环里 */
       const delay = Math.max(120, Math.min(5 * 60 * 1000, wake - Date.now()));
       timer = window.setTimeout(step, delay);
     };
     timer = window.setTimeout(step, 300);
     return function () { if (timer !== null) window.clearTimeout(timer); };
-  }, [active, pageVisible, rt, mood.sleepAfterMs, mood.energy]);
+  }, [active, pageVisible, rt, mood.sleepAfterMs, mood.energy, dozeDev]);
 
   /*
    * 课前招手：只在临近上课的十分钟里。
@@ -502,6 +556,8 @@ React.useEffect(function () {
         className={'mascot' + (dragging ? ' dragging' : '') + (walking ? ' walking' : '')}
         style={style}
         data-phase={phase}
+        /* 打盹循环：1 = 正处在"睡了一觉之后醒一小会儿"的那一段（自检要看它） */
+        data-stir={rt.stirUntil > 0 && phase !== 'sleep' ? '1' : '0'}
         data-kind={asset.kind}
         data-state={stateKey}
         /* 检查用：把"网格几格、真实几帧"暴露出来，外部才能判断播到的格子是不是空档 */
@@ -523,7 +579,7 @@ React.useEffect(function () {
           behavior={rt.behavior}
           jitter={rt.jitter}
           reaction={rt.reaction}
-          reactionSeq={reactionSeq}
+          reactionSeq={reactionSeq + (rt.reactionSeq || 0)}
           walking={walking}
           gait={walking && fakeGait}
           paused={reduced || !pageVisible}

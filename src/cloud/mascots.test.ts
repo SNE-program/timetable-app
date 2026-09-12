@@ -6,7 +6,10 @@ import { extractAssets } from '../storage/assetRef';
 import { defaultTheme } from '../theme/tokens';
 import { buildDemoData } from '../core/demo';
 import { __setCloudConfigForTest } from './config';
-import { MAX_MASCOT_BYTES, formatMb, isMine, prepareMascotUpload, quotaLine, uploadMascot, fetchMascot } from './mascots';
+import {
+  MAX_MASCOT_BYTES, estimateMascotBytes, fetchMascot, formatMb, isMine, myQuota, prepareMascotUpload,
+  quotaLine, uploadMascot,
+} from './mascots';
 
 /**
  * 云端角色：**一个真实网络请求都不发**（fetch 全被换掉）。
@@ -93,6 +96,25 @@ describe('角色包的准备', function () {
     const parsed = mascotFileText(pack(false));
     expect(out.bytes).toBe(parsed.bytes);
   });
+
+  it('★ 估算体积不序列化整包，但和精确值差不了多少', function () {
+    /*
+     * 这一条钉的是"打开云端面板不许卡"：估算必须**只做加法**，
+     * 而且给用户看的数字不能离谱 —— 差在一个 JSON 外壳的量级以内。
+     */
+    const p = pack(false);
+    const exact = prepareMascotUpload(p).bytes;
+    const est = estimateMascotBytes(p).bytes;
+    expect(est).toBeGreaterThan(0);
+    expect(Math.abs(est - exact)).toBeLessThan(exact * 0.02 + 1024);
+    expect(estimateMascotBytes(p).missingAssets).toBe(false);
+  });
+
+  it('估算时本机缺素材如实标记（和上传前的判定一致）', function () {
+    const p = Object.assign({}, pack(true));
+    p.states = Object.assign({}, p.states, { idle: { kind: 'still', src: 'asset:根本没有这个key' } });
+    expect(estimateMascotBytes(p).missingAssets).toBe(true);
+  });
 });
 
 describe('缺素材时拒绝上传', function () {
@@ -178,6 +200,32 @@ describe('上传的两步与失败清理', function () {
   });
 });
 
+describe('配额查询', function () {
+  it('★ 两条查询是并行发的，不是一条等一条', async function () {
+    /*
+     * "打开云端面板要等多久"由串行的往返次数决定。
+     * 以前这里是 await 完 profiles 再去数自己的行数 —— 白白多一个来回，
+     * 手机上就是几百毫秒的"…"。用时间戳钉住并发：两条请求的发起时刻应当相同。
+     */
+    const started: number[] = [];
+    vi.stubGlobal('fetch', async function (url: string) {
+      started.push(Date.now());
+      const body = String(url).indexOf('/profiles') >= 0
+        ? JSON.stringify([{ unlimited_mascots: true }])
+        : JSON.stringify([{ id: 'a' }]);
+      /* 故意让第一条慢一点：串行的话第二条会在第一条结束之后才发 */
+      await new Promise(function (r) { setTimeout(r, 30); });
+      return { ok: true, status: 200, text: async function () { return body; } } as unknown as Response;
+    });
+    const q = await myQuota('token-1');
+    expect(started.length).toBe(2);
+    expect(Math.abs(started[1] - started[0])).toBeLessThan(10);
+    expect(q.unlimited).toBe(true);
+    expect(q.used).toBe(1);
+    expect(q.limit).toBe(2);
+  });
+});
+
 describe('取回角色', function () {
   it('公开角色不带登录令牌也能取（策略放行）', async function () {
     const calls = stub(function () { return { text: mascotFileText(pack(false)).text }; });
@@ -193,5 +241,15 @@ describe('取回角色', function () {
     await fetchMascot('t', 'u1/m2.json');
     expect(calls[0].url).toContain('/mascots/u1/m2.json');
     expect(calls[0].url.indexOf('%2F')).toBe(-1);
+  });
+
+  it('★ 服务器回的是对象时直接校验，不再序列化一遍（几 MB 的包白转两趟）', async function () {
+    const body = JSON.parse(mascotFileText(pack(false)).text);
+    const calls = stub(function () { return { json: body }; });
+    const r = await fetchMascot('t', 'u1/m3.json');
+    expect(calls.length).toBe(1);
+    expect(r.ok).toBe(true);
+    expect(r.pack!.name).toBe('演示角色');
+    expect(r.pack!.states.idle).toBeTruthy();
   });
 });

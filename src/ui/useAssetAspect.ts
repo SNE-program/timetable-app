@@ -1,5 +1,5 @@
 import React from 'react';
-import { MASCOT_STATES, type MascotAsset, type MascotPack } from '../mascot/types';
+import type { MascotAsset } from '../mascot/types';
 
 /**
  * 一个素材**单格**的宽高比。
@@ -27,30 +27,6 @@ const cache: Record<string, number> = {};
  * 用户看到的是一次无缝的状态切换。
  */
 let lastAspect = 0;
-
-/**
- * 提前把图片解码进内存。
- *
- * 角色在四个状态之间切换时 `background-image` 会换源，浏览器要重新解码一张
- * 几百 KB 到几 MB 的 data URI —— 手机上半秒都有可能，那半秒里角色是空白的。
- * 所以角色一装上就先把四个状态的图都解一遍。
- */
-export function prewarmImage(src: string): void {
-  if (!src) return;
-  try {
-    const img = new Image();
-    img.decoding = 'async';
-    img.src = src;
-  } catch (e) { /* 解不了就算了，真用的时候还会再试一次 */ }
-}
-
-export function prewarmMascotAssets(pack: MascotPack | null | undefined): void {
-  if (!pack) return;
-  for (const key of MASCOT_STATES) {
-    const a = pack.states[key];
-    if (a && a.src) prewarmImage(a.src);
-  }
-}
 
 export function useAssetAspect(asset?: MascotAsset): number {
   const src = asset && asset.src ? asset.src : '';

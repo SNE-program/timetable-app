@@ -164,8 +164,9 @@ CSS 媒体查询分不出「电脑」和「安卓平板」，所以判断放在 
 理由很直接：同学拿到的是链接，这一页应该立刻给出安装包与安装步骤，而不是先等 650KB 的包加载完、
 再让人自己去「设置 → 关于」里找。
 
-按钮指向 `releases/latest/download/timetable-app.apk` —— 这要求发版时**同时上传一个固定名字的附件**；
-版本化的 `timetable-app-vX.Y.Z.apk` 用来留档，两个文件内容相同。
+按钮指向 **Supabase Storage 的公开桶**（`app/timetable-app.apk`），不再是 GitHub Releases ——
+v1.8.2 实测过 `github.com` 在校园网 / 国内网络里经常直接连不上，从浏览器点下载同样会失败。
+GitHub 那份保留成**备选**（应用内更新会依次尝试两个地址），版本化的 `timetable-app-vX.Y.Z.apk` 用来留档。
 
 应用内所有「获取 Android 版」都指向这一页（`meta.ts` 的 `DOWNLOAD_PAGE`），
 它随构建产物一起发布，任何构建里都存在，不会出现死链。

@@ -21,6 +21,10 @@ import { platformName } from '../platform/nativeBridge';
  * 记录**状态切换**（不是逐次采样），最后报出：做过哪几种动作、各占几次、
  * 最长的一次动作持续了多久、这段时间里反应了几次，以及切换序列本身。
  *
+ * 顺带还从 `.mascot` 上读 data-phase / data-stir，数出**睡了几次、半醒了几轮** ——
+ * "久等之后不会一直卡在同一个动画上"这条要求只有靠这个才验得了
+ * （配合 ?doze= 把打盹节奏压短，见 Mascot.tsx 的 readDozeDev）。
+ *
  * 为什么要专门做这个：动作的"随机感"是主观的，但"30 秒里只有一种动作"是客观的 ——
  * 上一版就是两条固定周期的正弦，看三秒就知道它在循环。
  */
@@ -51,6 +55,14 @@ function runBehaviorCheck(seconds: number): void {
   /** 走动时镜像（翻面）与未镜像的采样数 —— 用来验证"朝左走时翻面" */
   let mirrorSamples = 0;
   let normalSamples = 0;
+  /* 打盹循环：睡了几次、半醒了几轮、半醒占了多久 */
+  let sleeps = 0;
+  let stirs = 0;
+  let stirSamples = 0;
+  let sleepSamples = 0;
+  let lastPhase = '';
+  let lastStir = '';
+  const phaseSeq: string[] = [];
 
   const tick = window.setInterval(function () {
     const el = document.querySelector('.mascot-inner') as HTMLElement | null;
@@ -59,6 +71,22 @@ function runBehaviorCheck(seconds: number): void {
     samples++;
     const b = el.getAttribute('data-behavior') || '?';
     const rx = el.getAttribute('data-reaction') || '';
+    /* 相位与"是不是正处在半醒那一小段" —— 都在宿主节点上 */
+    const ph = (host && host.getAttribute('data-phase')) || '?';
+    const stir = (host && host.getAttribute('data-stir')) === '1';
+    if (ph !== lastPhase) {
+      if (ph === 'sleep') sleeps++;
+      phaseSeq.push(ph);
+      lastPhase = ph;
+    }
+    if (stir) {
+      stirSamples++;
+      if (lastStir !== '1') stirs++;
+      lastStir = '1';
+    } else {
+      lastStir = '0';
+    }
+    if (ph === 'sleep') sleepSamples++;
     if (b !== last) {
       if (last !== '') {
         const run = Date.now() - lastChangeAt;
@@ -112,6 +140,9 @@ function runBehaviorCheck(seconds: number): void {
     const text = 'BEHAVE ' + dur + 's 采样' + samples + '次 动作种类=' + kinds.length
       + ' 切换' + Math.max(0, seq.length - 1) + '次 最长同动作=' + (longestRun / 1000).toFixed(1) + 's'
       + ' 反应=' + reactions + '次' + (reactionKinds.length ? '[ ' + reactionKinds.join(' ') + ' ]' : '')
+      + ' | 睡' + sleeps + '次 半醒' + stirs + '轮(采样' + stirSamples + '/' + samples + ')'
+      + ' 睡着采样' + sleepSamples + '/' + samples
+      + ' | 相位: ' + phaseSeq.join(' → ')
       + ' | 分布: ' + kinds.map(function (k) { return k + '×' + counts[k]; }).join(' ')
       + ' | 序列: ' + seq.join(' → ')
       + ' | ' + (isFinite(minLeft)

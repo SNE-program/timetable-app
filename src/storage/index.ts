@@ -87,6 +87,47 @@ function lsSave(): void {
   }
 }
 
+/*
+ * 后备（localStorage）路径上的写入合并。
+ *
+ * 为什么必须有这个：`lsSave` 是**整表**重写 —— 把内存里所有图片拼成一个 JSON
+ * 再塞进 localStorage。而"导入一个角色"是连着 putAsset 四次（四个状态素材），
+ * 于是同一份几 MB 的字符串被拼了四遍、写了四遍。网页版上这一步就是肉眼可见的卡顿，
+ * 而且每次都逼近 localStorage 那约 5 MB 的配额。
+ *
+ * 合并之后：同一轮里的多次改动只整表重写一次。
+ * 代价是"晚一个宏任务落盘"，所以两处兜底一定要留着 ——
+ * 页面转入后台或即将卸载时立刻写完，否则"刚导入就切走/被杀"会丢。
+ */
+let lsDirty = false;
+let lsTimer: ReturnType<typeof setTimeout> | null = null;
+let lsHooked = false;
+
+function flushLs(): void {
+  if (lsTimer !== null) { clearTimeout(lsTimer); lsTimer = null; }
+  if (!lsDirty) return;
+  lsDirty = false;
+  try { lsSave(); } catch (e) { /* lastError 已在 lsSave 里记下 */ }
+}
+
+function hookLsFlush(): void {
+  if (lsHooked) return;
+  lsHooked = true;
+  try {
+    window.addEventListener('pagehide', flushLs);
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'hidden') flushLs();
+    });
+  } catch (e) { /* 非浏览器环境（单测）不挂，什么都不影响 */ }
+}
+
+function lsSaveSoon(): void {
+  hookLsFlush();
+  lsDirty = true;
+  if (lsTimer !== null) return;
+  lsTimer = setTimeout(flushLs, 0);
+}
+
 /* ------------------------------ 初始化 ------------------------------ */
 
 /**
@@ -200,7 +241,8 @@ export function putAsset(key: string, uri: string): void {
       });
     return;
   }
-  try { lsSave(); } catch (e) { /* lastError 已在 lsSave 里记下 */ }
+  /* 合并写入：一次导入里的几张图只会整表重写一次（见 lsSaveSoon 的说明） */
+  lsSaveSoon();
 }
 
 export function deleteAsset(key: string): void {
@@ -209,7 +251,7 @@ export function deleteAsset(key: string): void {
     void db.run('DELETE FROM assets WHERE key = ?;', [key]).catch(function () { /* 忽略 */ });
     return;
   }
-  try { lsSave(); } catch (e) { /* 忽略 */ }
+  lsSaveSoon();
 }
 
 /** 清掉没有任何地方再引用的资产（换了壁纸之后旧图会留在这儿） */
@@ -248,4 +290,6 @@ export function __resetAssetsForTest(): void {
   db = null; sqlite = null; backend = 'none'; ready = false; lastError = null;
   cache.clear();
   kvCache.clear();
+  lsDirty = false;
+  if (lsTimer !== null) { clearTimeout(lsTimer); lsTimer = null; }
 }
