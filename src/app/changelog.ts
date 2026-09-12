@@ -46,6 +46,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 
 export const CHANGELOG: ChangeEntry[] = [
   {
+    version: '1.6.2',
+    date: '',
+    title: '邮件链接：换台新设备也接得住',
+    items: [
+      { kind: 'fix', text: '**在一台新设备上点「重置密码」的链接，以前会卡在首次启动那一屏**：链接其实生效了、账号也登录了，但「设置新密码」面板被首启说明挡在后面，看上去就是点了没反应。现在两屏会同时出现。' },
+      { kind: 'fix', text: '邮件链接的结果（邮箱已验证 / 链接已过期 / 链接已用过）现在会在**任何界面**上弹一次提示条，不再只有进设置页才看得到。' },
+      { kind: 'note', text: '这一版是上一版发布当天自测时发现的：同一条链接在已用过的浏览器上没问题，在一台干净的浏览器上才会露出来。' },
+    ],
+  },
+  {
     version: '1.6.1',
     date: '',
     title: '把邮件链接这条路走通',

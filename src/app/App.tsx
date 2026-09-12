@@ -203,6 +203,20 @@ export default function App() {
     /* eslint-disable-next-line react-hooks/exhaustive-deps -- 只在缺邮箱时跑 */
   }, [s.cloud.session]);
 
+  /*
+   * 从邮件链接回来时，把结果说出来一次。
+   *
+   * 这件事必须在这里做，不能只写在「云备份」面板里：点确认链接的人很可能正站在一台新设备上，
+   * 首次启动那屏还挡在前面，而面板在设置页里 —— 界面上见不到任何反馈。
+   * 链接过期、已用过这类失败，同样必须当场看得见。
+   */
+  React.useEffect(function () {
+    if (!s.cloud.linkType) return;
+    if (s.cloud.error) showToast(s.cloud.error, 'error');
+    else if (s.cloud.session && !s.cloud.passwordSheet) showToast('邮箱已验证，已为你登录', 'ok');
+    /* eslint-disable-next-line react-hooks/exhaustive-deps -- 只在启动时看一次 */
+  }, []);
+
   /* 数据迁移过就提示一次 */
   React.useEffect(function () {
     const notes = takeMigrateNotes();
@@ -320,8 +334,35 @@ export default function App() {
 
   const titles: Record<string, string> = { today: '今日', tasks: '任务与 DDL', studio: '外观 DIY', settings: '设置' };
 
-  /* 首次启动先讲清楚数据去哪了 —— 拦在最外层，其它一律不渲染 */
-  if (!s.prefs.privacySeen) return <Welcome />;
+  /*
+   * 首次启动先讲清楚数据去哪了 —— 拦在最外层，其它一律不渲染。
+   *
+   * 但有一个例外：**从邮件链接回来**（确认邮箱 / 重置密码）时，用户可能正站在一台新设备上，
+   * 首次启动那屏还在。这时必须把「设置新密码」面板一起渲染出来，
+   * 否则链接生效了、会话也建立了，界面上却没有任何地方能设置新密码 —— 实测踩到过。
+   */
+  const toastEl = s.toast ? (
+    /* 提示条是"发生了什么"的唯一反馈通道，屏幕阅读器必须能念出来 */
+    <div className={'toast ' + s.toast.kind} role="status" aria-live={s.toast.kind === 'error' ? 'assertive' : 'polite'}>
+      <span>{s.toast.text}</span>
+      {s.toast.undo ? (
+        <button
+          className="toast-undo"
+          onClick={function () { const u = s.toast && s.toast.undo; dismissToast(); if (u) u(); }}
+        >撤销</button>
+      ) : null}
+    </div>
+  ) : null;
+
+  if (!s.prefs.privacySeen) {
+    return (
+      <React.Fragment>
+        <Welcome />
+        {s.cloud.passwordSheet ? <PasswordSheet /> : null}
+        {toastEl}
+      </React.Fragment>
+    );
+  }
 
   return (
     <div className={wide ? 'app wide' : 'app'}>
@@ -486,18 +527,7 @@ export default function App() {
         />
       ) : null}
 
-      {s.toast ? (
-        /* 提示条是"发生了什么"的唯一反馈通道，屏幕阅读器必须能念出来 */
-        <div className={'toast ' + s.toast.kind} role="status" aria-live={s.toast.kind === 'error' ? 'assertive' : 'polite'}>
-          <span>{s.toast.text}</span>
-          {s.toast.undo ? (
-            <button
-              className="toast-undo"
-              onClick={function () { const u = s.toast && s.toast.undo; dismissToast(); if (u) u(); }}
-            >撤销</button>
-          ) : null}
-        </div>
-      ) : null}
+      {toastEl}
     </div>
   );
 }
