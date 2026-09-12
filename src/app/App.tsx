@@ -45,6 +45,7 @@ import { useWideLayout } from '../ui/useWideLayout';
 import { APP_VERSION } from './version';
 import { DOWNLOAD_PAGE } from './meta';
 import { isNativePlatform } from '../platform/nativeBridge';
+import { countRender } from './renderCount';
 
 const TABS = [
   { key: 'week', icon: 'calendar', label: '本周' },
@@ -55,6 +56,7 @@ const TABS = [
 ] as const;
 
 export default function App() {
+  countRender('App');
   const s = useApp();
   /* 电脑（宽屏）布局：只在浏览器里、且窗口足够宽时打开，见 useWideLayout 的注释 */
   const wide = useWideLayout();
@@ -448,9 +450,11 @@ export default function App() {
                     ) : null}
                   </button>
                 ) : null}
-                {tab !== 'settings' ? (
-                  <button className="icon-btn" title="设置" onClick={function () { setTab('settings'); }}><Icon name="settings" size={18} /></button>
-                ) : null}
+                {/*
+                  这里原来还有一个齿轮（设置）。
+                  但底部标签栏本来就有「设置」，而且它离拇指更近 ——
+                  同一个入口在屏幕上出现两次，只会让顶栏更挤（这一版在收这种重复）。
+                */}
                 <button className="icon-btn" title="搜索" onClick={openSearch}><Icon name="search" size={18} /></button>
                 <button className="icon-btn" title={tab === 'tasks' ? '添加任务' : '添加课程'} onClick={function () { if (tab === 'tasks') openTask(null); else openAdd(); }}>＋</button>
               </div>

@@ -492,17 +492,66 @@ export function ColorField(props: {
   );
 }
 
-export function Panel(props: { title?: string; sub?: string; desc?: string; children: React.ReactNode }) {
+/**
+ * 一块设置。
+ *
+ * `collapsible` 是这一版的默认姿态：**常显的只有"你现在需要知道的"，
+ * 一次性的、排错的、进阶的都收起来**。设置页以前是十几块平铺，
+ * 手机上一屏只能看到两块半 —— 找一样东西要靠翻。
+ *
+ * 收起时**不渲染正文**（不是用 CSS 藏起来）：里面的文件选择框、日历、滑杆
+ * 都不会白白挂载，所以"收起来"同时也是省一份渲染。
+ */
+export function Panel(props: {
+  title?: string;
+  sub?: string;
+  desc?: string;
+  children: React.ReactNode;
+  /** 可收起：标题行变成开关，正文默认收起 */
+  collapsible?: boolean;
+  /** 收起型面板默认是否展开（缺省 false） */
+  defaultOpen?: boolean;
+  /** 标题行右侧的附加内容（计数、状态标签等） */
+  aside?: React.ReactNode;
+}) {
+  const [open, setOpen] = React.useState(!!props.defaultOpen);
+
+  if (!props.collapsible) {
+    return (
+      <div className="panel">
+        {props.title ? (
+          <div className="panel-head">
+            <div className="panel-title">{props.title}</div>
+            {props.sub ? <div className="panel-sub">{props.sub}</div> : null}
+          </div>
+        ) : null}
+        {props.desc ? <div className="panel-desc">{props.desc}</div> : null}
+        {props.children}
+      </div>
+    );
+  }
+
   return (
-    <div className="panel">
-      {props.title ? (
-        <div className="panel-head">
+    <div className={open ? 'panel collapsible open' : 'panel collapsible'}>
+      <button
+        type="button"
+        className="panel-head collapsible-head"
+        aria-expanded={open}
+        onClick={function () { setOpen(!open); }}
+      >
+        <div className="ph-text">
           <div className="panel-title">{props.title}</div>
           {props.sub ? <div className="panel-sub">{props.sub}</div> : null}
         </div>
+        {props.aside}
+        <span className="panel-caret" aria-hidden="true">▾</span>
+      </button>
+      {open ? (
+        <div className="panel-body">
+          {props.desc ? <div className="panel-desc">{props.desc}</div> : null}
+          {props.children}
+        </div>
       ) : null}
-      {props.desc ? <div className="panel-desc">{props.desc}</div> : null}
-      {props.children}
     </div>
   );
 }

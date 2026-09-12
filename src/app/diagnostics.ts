@@ -8,7 +8,8 @@
  * 用法：?diag=1            在当前视口测
  *       ?diag=1&w=360,390  在 360 / 390 宽的 iframe 里分别测
  */
-import { getState } from './store';
+import { getState, storeEmitCount } from './store';
+import { renderCounts } from './renderCount';
 import { renderTimetableImage } from '../ui/timetableImage';
 import { platformName } from '../platform/nativeBridge';
 
@@ -373,9 +374,70 @@ function runFrameCheck(): void {
   }
 }
 
+/**
+ * 性能自检（`?perf=秒数`）。
+ *
+ * 回答的问题："这一版比上一版更轻还是更重？"
+ *
+ * 做法：在指定秒数内数四件事，全是可以横向对比的量：
+ *   1. **各视图渲染次数** —— 无关状态变化引起的重渲染在这里藏不住；
+ *   2. **store 通知次数** —— 一次通知不等于一次重渲染，两个数一起看才有意义；
+ *   3. **长任务**（PerformanceObserver 的 longtask）—— 主线程被占住超过 50ms 的次数与总时长，
+ *      这是"卡一下"最接近客观的定义；
+ *   4. **首屏时间** —— FCP（有的话）与首次渲染时刻。
+ *
+ * 计数本身在运行时几乎不要钱（对象自增），所以这几个计数器留在代码里没有负担。
+ */
+function runPerfCheck(seconds: number): void {
+  const startedAt = Date.now();
+  const longTasks: number[] = [];
+  try {
+    if (typeof PerformanceObserver !== 'undefined') {
+      const po = new PerformanceObserver(function (list) {
+        list.getEntries().forEach(function (e) { longTasks.push(e.duration); });
+      });
+      po.observe({ entryTypes: ['longtask'] });
+    }
+  } catch (e) { /* 不支持就不记 */ }
+
+  let send = function (_t: string): void { /* 默认不回传 */ };
+  try { send = makeReporter(new URLSearchParams(window.location.search).get('report') || ''); } catch (e) { /* 忽略 */ }
+
+  window.setTimeout(function () {
+    const counts = renderCounts();
+    const names = Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a]; });
+    const longTotal = longTasks.reduce(function (a, b) { return a + b; }, 0);
+    let fcp: number | null = null;
+    try {
+      const e = performance.getEntriesByName('first-contentful-paint')[0];
+      if (e) fcp = Math.round(e.startTime);
+    } catch (err) { /* 忽略 */ }
+    const label = new URLSearchParams(window.location.search).get('label') || '';
+    const text = 'PERF' + (label ? '[' + label + ']' : '') + ' ' + Math.round((Date.now() - startedAt) / 1000) + 's'
+      + ' | 渲染: ' + names.map(function (n) { return n + '×' + counts[n]; }).join(' ')
+      + ' | store 通知 ' + storeEmitCount() + ' 次'
+      + ' | 长任务 ' + longTasks.length + ' 个 共 ' + Math.round(longTotal) + 'ms'
+      + (longTasks.length ? '（最长 ' + Math.round(Math.max.apply(null, longTasks)) + 'ms）' : '')
+      + ' | FCP ' + (fcp === null ? '—' : fcp + 'ms')
+      + ' | DOM ' + document.getElementsByTagName('*').length + ' 节点';
+
+    const pre = document.createElement('pre');
+    pre.id = 'perfcheck';
+    pre.style.cssText = 'position:fixed;left:0;bottom:0;z-index:99999;font:10px monospace;'
+      + 'background:#000;color:#0f0;margin:0;padding:4px;';
+    pre.textContent = text;
+    document.body.appendChild(pre);
+    send(text);
+  }, Math.max(3000, seconds * 1000));
+}
+
 export function runDiagnostics(): void {
   const params = new URLSearchParams(window.location.search);
 
+  if (params.get('perf')) {
+    const sec = Number(params.get('perf'));
+    runPerfCheck(isFinite(sec) && sec >= 3 ? Math.min(120, sec) : 10);
+  }
   if (params.get('framecheck') === '1') runFrameCheck();
   if (params.get('behavecheck')) {
     const sec = Number(params.get('behavecheck'));

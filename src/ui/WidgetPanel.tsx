@@ -2,22 +2,19 @@ import React from 'react';
 import { Panel } from './common';
 import { showToast, useApp } from '../app/store';
 import { pushWidgetData } from '../platform/widget';
-import { isNativePlatform } from '../platform/nativeBridge';
-import { DOWNLOAD_PAGE } from '../app/meta';
 
 /**
- * 桌面小组件说明与手动同步。
+ * 桌面小组件说明与手动同步（只在 Android 版渲染）。
  *
  * 加这个面板是因为：小组件在桌面上，而功能入口在应用里 ——
  * 用户装了应用但从来不知道有小组件，是这类功能最常见的死法。
  * 系统不允许应用自己往桌面加小组件，只能把路径写清楚让他自己加。
  *
- * 网页版没有对应能力（网页无法往桌面放任何东西），所以这里不摆一套
- * 做不到的说明，而是直接讲清楚为什么没有，以及想要的话去哪里拿。
+ * 网页版**不渲染这一块**：浏览器没法往桌面放任何东西，讲一遍"为什么没有"
+ * 只是又一次告诉用户他做不到的事 —— 想要的人去「关于 → 获取 Android 版」。
  */
 export default function WidgetPanel() {
   const s = useApp();
-  const native = isNativePlatform();
   const [busy, setBusy] = React.useState(false);
 
   async function syncNow(): Promise<void> {
@@ -30,51 +27,12 @@ export default function WidgetPanel() {
     }
   }
 
-  if (!native) {
-    return (
-      <Panel
-        title="桌面小组件"
-        sub="仅 Android 版提供"
-        desc="不用打开应用就能看到下一节课和今天的安排。倒计时由桌面自己走，不会额外耗电。"
-      >
-        <div className="list-row">
-          <div className={'dot warn'} />
-          <div>
-            <div className="lr-label">网页版为什么没有</div>
-            <div className="lr-sub">
-              桌面小组件是 Android 系统自己的能力，由系统进程直接绘制在桌面上。
-              浏览器里的网页没法往桌面放任何东西，所以这一项没有可以照搬的实现。
-            </div>
-          </div>
-        </div>
-        <div className="list-row">
-          <div>
-            <div className="lr-label">想要的话怎么办</div>
-            <div className="lr-sub">
-              Android 版有 2×2 与 4×2 两种尺寸。两边的数据是互通的：在这里用
-              「设置 → 课表数据 → 导出课表数据」导出 JSON，在手机上导入即可，不用重录。
-            </div>
-          </div>
-        </div>
-        {/* 指向站内的下载页：那一页有安装步骤与直接下载按钮，比直接甩一个 Releases 链接友好 */}
-        <div className="check-actions" style={{ borderTop: 0, paddingTop: 4 }}>
-          <a className="btn sm primary" href={DOWNLOAD_PAGE}>获取 Android 版</a>
-          <span className="panel-desc" style={{ padding: '0 0 0 10px' }}>安装包与安装步骤都在那一页</span>
-        </div>
-      </Panel>
-    );
-  }
-
   return (
-    <Panel
-      title="桌面小组件"
-      sub="2×2 / 4×2"
-      desc="不用打开应用就能看到下一节课和今天的安排。倒计时由桌面自己走，不会额外耗电。"
-    >
+    <Panel title="桌面小组件" sub="2×2 / 4×2" collapsible>
       <div className="list-row">
         <div>
           <div className="lr-label">怎么添加</div>
-          <div className="lr-sub">回到桌面 → 长按空白处 → 小组件 → 找到「课表助手」→ 拖到桌面上。系统不允许应用自己添加，只能你来拖。</div>
+          <div className="lr-sub">回到桌面 → 长按空白处 → 小组件 → 找到「课表助手」→ 拖到桌面上。系统不允许应用自己添加。</div>
         </div>
       </div>
       <div className="list-row">

@@ -14,6 +14,7 @@ import { resolveDark, type Theme } from '../theme/tokens';
 import { useCourseMap, useMinuteClock } from './useMinuteClock';
 import { DateField } from './common';
 import { Icon } from './icons';
+import { countRender } from '../app/renderCount';
 
 const WEEKDAY_CN = ['一', '二', '三', '四', '五', '六', '日'];
 
@@ -116,6 +117,7 @@ function EventCard(props: { e: ConcreteEvent; course: Course | undefined; theme:
 }
 
 export default function WeekView() {
+  countRender('WeekView');
   const s = useApp();
   const data = s.data;
   const theme = s.theme;

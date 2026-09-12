@@ -611,7 +611,10 @@ function initialState(): AppState {
     exportSheet: openParam() === 'export',
     importSheet: openParam() === 'import-sheet',
     manualSheet: openParam() === 'manual',
-    manualSection: null,
+    /* ?open=manual&doc=privacy：检查用，直接落到某一章（见 ManualView 的章节切换） */
+    manualSection: openParam() === 'manual' ? (function () {
+      try { return new URLSearchParams(window.location.search).get('doc'); } catch (e) { return null; }
+    })() : null,
     changelogSheet: openParam() === 'changelog',
     mascot: loadMascot(),
     /*
@@ -636,7 +639,17 @@ let state: AppState = initialState();
 const listeners = new Set<Listener>();
 let toastTimer: number | null = null;
 
-function emit(): void { listeners.forEach(function (l) { l(); }); }
+/**
+ * 通知次数。只给 `?perf=` 自检读 —— "一次无关变化让整棵树重渲染"是看不见的开销，
+ * 而这个数字把它变成可以对比的量。
+ */
+let emitCount = 0;
+function emit(): void {
+  emitCount++;
+  listeners.forEach(function (l) { l(); });
+}
+
+export function storeEmitCount(): number { return emitCount; }
 
 export function getState(): AppState { return state; }
 

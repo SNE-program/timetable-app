@@ -102,7 +102,7 @@ export default function TaskView() {
       ) : null}
 
       <div className="panel-desc" style={{ padding: '14px 2px 0' }}>
-        带截止日期的任务会自动进入提醒排程，可以在「设置 → 提醒通道 → 接下来的提醒」里看到。
+        带截止日期的任务会自动进入提醒排程，可以在「设置 → 排查工具 → 接下来的提醒」里看到。
       </div>
     </div>
   );

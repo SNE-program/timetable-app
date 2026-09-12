@@ -12,6 +12,7 @@ import type { CardStyle, Density, FontKey, ModePref } from '../theme/tokens';
 import { ColorField, Panel, Segmented, SliderRow, SwitchRow } from './common';
 import MascotPanel from './MascotPanel';
 import type { WallpaperFit } from '../theme/tokens';
+import { countRender } from '../app/renderCount';
 
 const ACCENTS = ['#2F6BFF', '#6D4AFF', '#C2478E', '#E0524A', '#E07B2E', '#B8A02E', '#3F9A54', '#0F766E', '#2AA0A8', '#1B1D21', '#8A6A4B', '#5B6B7C'];
 
@@ -58,6 +59,7 @@ function PresetCard(props: { preset: ThemePreset; active: boolean; onPick: () =>
 }
 
 export default function ThemeStudio() {
+  countRender('ThemeStudio');
   const s = useApp();
   const theme = s.theme;
   const wp = theme.wallpaper;
@@ -157,7 +159,7 @@ export default function ThemeStudio() {
         >{locked ? '解锁' : '锁定'}</button>
       </div>
 
-      <Panel title="一键主题" sub={THEME_PRESETS.length + ' 套内置'} desc="点一下立刻换装。所有主题都带壁纸与配色，可以直接作为起点继续改。">
+      <Panel title="一键主题" sub={THEME_PRESETS.length + ' 套内置'} desc="点一下立刻换装，选好再按需微调下面几项。">
         <div className="preset-scroll">
           {THEME_PRESETS.map(function (p) {
             return (
@@ -170,9 +172,37 @@ export default function ThemeStudio() {
             );
           })}
         </div>
+        {/*
+          浅色 / 深色 / 跟随系统，以及"每周显示几天" —— 这两项是这一页里最常改的，
+          原来埋在「文字与排版」深处。位置判断很简单：它们影响的是**看课表方不方便**，
+          不像字体和圆角那样属于口味。
+        */}
+        <div className="section-title">显示</div>
+        <div style={{ padding: '0 16px 10px' }}>
+          <Segmented<ModePref>
+            value={theme.modePref}
+            onChange={function (v) { patchTheme({ modePref: v }); }}
+            options={[
+              { value: 'light', label: '浅色' },
+              { value: 'dark', label: '深色' },
+              { value: 'auto', label: '跟随系统' },
+            ]}
+          />
+        </div>
+        <div style={{ padding: '0 16px 14px' }}>
+          <Segmented<string>
+            value={String(theme.showDays || 7)}
+            onChange={function (v) { patchTheme({ showDays: Number(v) }); }}
+            options={[
+              { value: '5', label: '只工作日' },
+              { value: '6', label: '到周六' },
+              { value: '7', label: '整周' },
+            ]}
+          />
+        </div>
       </Panel>
 
-      <Panel title="背景" sub={wp.kind === 'none' ? '纯色' : wp.kind === 'preset' ? '内置图片' : '自定义图片'} desc="可以什么都不放，也可以放一张自己喜欢的图。图片会跟着主题包一起导出。">
+      <Panel title="背景" sub={wp.kind === 'none' ? '纯色' : wp.kind === 'preset' ? '内置图片' : '自定义图片'} desc="放一张自己的图，会跟着主题包一起导出。">
         <div className="wp-grid">
           <button
             className={wp.kind === 'none' ? 'wp-item active' : 'wp-item'}
@@ -261,7 +291,7 @@ export default function ThemeStudio() {
         ) : null}
       </Panel>
 
-      <Panel title="主色" sub="课程色由它推导" desc="改一个主色，12 个课程颜色会一起重新生成，保证整体协调。">
+      <Panel title="主色" sub="课程色由它推导" desc="改一个主色，12 个课程颜色一起重新生成，整体还是协调的。">
         <div className="color-row">
           {ACCENTS.map(function (c) {
             return (
@@ -288,7 +318,7 @@ export default function ThemeStudio() {
         <SliderRow label="课程色彩饱和" value={Math.round(theme.courseSaturation * 100)} min={0} max={140} step={5} format={function (v) { return v + '%'; }} onChange={function (v) { patchTheme({ courseSaturation: v / 100, courseColors: [] }); }} />
       </Panel>
 
-      <Panel title="课程卡" sub="五种质感" desc="默认的「色条」是工业化做法：颜色只出现在左侧色条上，卡片保持白底描边，一眼就能扫完一整天。">
+      <Panel title="课程卡" sub="五种质感" collapsible desc="默认的「色条」：颜色只出现在左侧色条上，卡片保持白底描边，一眼能扫完一整天。">
         <div style={{ padding: '4px 16px 14px' }}>
           <Segmented<CardStyle>
             value={theme.cardStyle}
@@ -307,7 +337,7 @@ export default function ThemeStudio() {
         <SliderRow label="面板通透度" value={Math.round(theme.panelAlpha * 100)} min={30} max={100} step={5} format={function (v) { return v + '%'; }} onChange={function (v) { patchTheme({ panelAlpha: v / 100, glassBlur: theme.glassBlur || 18 }); }} />
       </Panel>
 
-      <Panel title="文字与排版">
+      <Panel title="文字与排版" sub="字体 · 字号 · 密度" collapsible>
         <div style={{ padding: '4px 16px 14px' }}>
           <Segmented<FontKey>
             value={theme.font}
@@ -332,17 +362,6 @@ export default function ThemeStudio() {
             ]}
           />
         </div>
-        <div style={{ padding: '4px 16px 14px' }}>
-          <Segmented<ModePref>
-            value={theme.modePref}
-            onChange={function (v) { patchTheme({ modePref: v }); }}
-            options={[
-              { value: 'light', label: '浅色' },
-              { value: 'dark', label: '深色' },
-              { value: 'auto', label: '跟随系统' },
-            ]}
-          />
-        </div>
         <SwitchRow label="显示任课教师" on={theme.showTeacher} onChange={function (v) { patchTheme({ showTeacher: v }); }} />
         <SwitchRow
           label="色盲友好配色"
@@ -350,26 +369,6 @@ export default function ThemeStudio() {
           on={theme.colorBlind}
           onChange={function (v) { patchTheme({ colorBlind: v, courseColors: [] }); }}
         />
-        <div className="slider-row">
-          <div className="slider-head">
-            <span className="small">每周显示几天</span>
-            <span className="sv">{(theme.showDays || 7) === 5 ? '只显示工作日' : (theme.showDays || 7) === 6 ? '周一到周六' : '整周'}</span>
-          </div>
-          <div style={{ marginTop: 6 }}>
-            <Segmented<string>
-              value={String(theme.showDays || 7)}
-              onChange={function (v) { patchTheme({ showDays: Number(v) }); }}
-              options={[
-                { value: '5', label: '5 天' },
-                { value: '6', label: '6 天' },
-                { value: '7', label: '7 天' },
-              ]}
-            />
-          </div>
-          <div className="field-label" style={{ marginTop: 8 }}>
-            手机竖屏只有 360 来 px 宽。显示 5 天时每列宽将近 60px，课程名能完整显示；7 天时每列只有 44px。
-          </div>
-        </div>
       </Panel>
 
       {/* 角色面板不受外观锁定影响：导入角色包是数据操作，不是调样式，
@@ -383,7 +382,8 @@ export default function ThemeStudio() {
       <Panel
         title="主题包"
         sub="含图片"
-        desc="导出的文件里带着壁纸图片本身，发给同学、直接导入就能用，不需要再单独传图。"
+        collapsible
+        desc="文件里带着壁纸图片本身，发给同学、导入就能用。"
       >
         <div style={{ display: 'flex', gap: 10, padding: '2px 16px 14px' }}>
           <button className="btn primary" style={{ flex: 1 }} onClick={function () { void exportThemeNow(); }}>导出主题包</button>
@@ -400,10 +400,7 @@ export default function ThemeStudio() {
             e.target.value = '';
           }}
         />
-        <div className="panel-desc">
-          主题包文件也可以直接拖到屏幕上导入。
-          想给某门课单独配图，进课程详情里换。
-        </div>
+        <div className="panel-desc">主题包文件也可以直接拖到屏幕上导入；给某门课单独配图在课程详情里。</div>
       </Panel>
     </div>
   );

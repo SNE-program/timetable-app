@@ -11,6 +11,7 @@ import { nextEvent, todayISO } from '../core/engine';
 import MascotArt from './MascotArt';
 import { Icon } from './icons';
 import { frameCount, type MascotAsset, type MascotState } from '../mascot/types';
+import { countRender } from '../app/renderCount';
 
 /**
  * 课表界面上的「角色」。
@@ -90,6 +91,7 @@ function readDozeDev(): DozeDev | null {
 const EDGE = 6;
 
 export default function MascotOverlay() {
+  countRender('Mascot');
   const s = useApp();
   const pack = s.mascot;
   const mp = s.prefs.mascot;
@@ -368,7 +370,16 @@ export default function MascotOverlay() {
 
   /* -------------------- 位置 -------------------- */
 
-  const insets = measureInsets();
+  /*
+   * 顶栏下沿与标签栏上沿。
+   *
+   * 必须**缓存**：这两个 getBoundingClientRect 会强制一次布局，
+   * 而角色会跟着 store 的每一次变化重渲染（换标签、来提示条、云端状态……）。
+   * 以前是每次渲染都量两下 —— 平白无故的强制同步布局。
+   * 真正会改变它们的是这几件事：视口变化（转屏、分屏、软键盘）、
+   * 切到课表页（顶栏在只课表页才有周次条）。所以只跟着这两样重算。
+   */
+  const insets = React.useMemo(function () { return measureInsets(); }, [view.stamp, onTimetable]);
   const hpx = mp.size;
   /*
    * 位置只按**锚点**钳制，不再需要角色的宽高 ——

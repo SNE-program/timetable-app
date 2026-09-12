@@ -17,7 +17,7 @@ const POINTS: { icon: IconName; title: string; sub: string }[] = [
   {
     icon: 'lock',
     title: '数据只在这台设备上',
-    sub: '课表、任务、出勤记录都存在本机，不注册也能用，也不会传到任何服务器 —— 除非你自己开启云备份。',
+    sub: '不注册也能用，课表不会传到任何服务器。',
   },
   {
     icon: 'ban',
@@ -27,16 +27,13 @@ const POINTS: { icon: IconName; title: string; sub: string }[] = [
      * 它仍然默认成立（不登录就不会联网），但必须把条件说出来，
      * 否则用户以为"这东西永远不联网"，而某天点了备份才发现不是。
      */
-    sub: isNativePlatform()
-      ? '不含任何广告或统计 SDK。应用申请的权限只有通知、闹钟和震动。'
-        + (cloudConfigured() ? '云备份默认关闭，你不点就不会联网。' : '')
-      : '不含任何广告或统计脚本。'
-        + (cloudConfigured() ? '云备份默认关闭，你不点就不会联网。' : '页面不会向任何服务器发请求。'),
+    sub: isNativePlatform() ? '没有广告或统计 SDK，权限只申请通知、闹钟和震动。' : '没有广告或统计脚本。'
+      + (cloudConfigured() ? '云备份默认关闭。' : ''),
   },
   {
     icon: 'archive',
     title: '随时可以完整带走',
-    sub: '「设置 → 课表数据」能导出 JSON 备份与 ICS 日历，随时迁到别的工具。',
+    sub: '「设置 → 课表数据」能导出 JSON 备份与 ICS 日历。',
   },
   /*
    * 最后一条按运行环境说实话。
@@ -49,13 +46,12 @@ const POINTS: { icon: IconName; title: string; sub: string }[] = [
     ? {
       icon: 'bell',
       title: '提醒交给系统闹钟',
-      sub: '不用一直开着应用。息屏、关掉应用、重启手机之后，该响的照样响。',
+      sub: '不用一直开着应用：息屏、重启之后照样响。',
     }
     : {
       icon: 'bell',
       title: '提醒需要页面保持打开',
-      sub: '浏览器不允许网页在关闭后自己唤醒，所以网页版只在标签页开着时准时提醒。'
-        + '需要关掉也响，请装 Android 版（数据可以导出带走，不用重录）。',
+      sub: '页面关掉就不会响 —— 浏览器不允许网页自己唤醒。想关掉也响就装 Android 版。',
     },
 ];
 
@@ -97,8 +93,8 @@ export default function Welcome() {
         </button>
         <div className="welcome-foot">
           {isNativePlatform()
-            ? '隐私说明与使用说明书随时可以在「设置 → 关于」里再看一遍'
-            : '数据只存在这个浏览器里：清除站点数据会一起清掉，记得在「设置 → 课表数据」导出备份'}
+            ? '隐私说明与说明书在「设置 → 关于」里'
+            : '数据只在这个浏览器里，清除站点数据会一起清掉 —— 记得导出备份'}
         </div>
       </div>
     </div>

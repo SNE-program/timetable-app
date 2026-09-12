@@ -1246,6 +1246,29 @@ input[type="range"].rng::-moz-range-thumb { width: 12px; height: 12px; border-ra
 .panel-sub { font-size: var(--fs-xs); color: var(--c-text-muted); margin-left: auto; }
 .panel-desc { padding: 0 14px 12px; font-size: var(--fs-xs); color: var(--c-text-muted); line-height: 1.65; }
 
+/*
+ * 收起型面板。
+ *
+ * 设置页以前是十几块平铺：手机上一屏只能看到两块半，想找一样东西得一路翻。
+ * 现在常显的只有"此刻需要知道的"，一次性的 / 排错的 / 进阶的都收进这里。
+ * 标题行整行可点（是个真 <button>，键盘也能收放），右侧箭头会转。
+ */
+.panel.collapsible .collapsible-head {
+  width: 100%; background: none; border: 0; padding: 12px 14px;
+  display: flex; align-items: center; gap: 8px;
+  color: inherit; font: inherit; text-align: left; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.panel.collapsible .collapsible-head .ph-text { min-width: 0; flex: 1 1 auto; }
+.panel.collapsible .panel-caret {
+  flex: 0 0 auto; color: var(--c-text-muted); font-size: 11px; line-height: 1;
+  transition: transform var(--dur) var(--ease);
+}
+.panel.collapsible.open .panel-caret { transform: rotate(180deg); }
+.panel.collapsible:not(.open) { background: var(--c-surface-2); }
+.panel.collapsible:not(.open) .collapsible-head { padding-bottom: 12px; }
+.panel.collapsible .panel-sub { margin-left: 0; }
+
 /* ============================================================
    文档型弹层：使用说明书 / 更新日志
    这两处是"要读的东西"，所以和其他弹层不同：占满全屏、
@@ -1308,6 +1331,19 @@ input[type="range"].rng::-moz-range-thumb { width: 12px; height: 12px; border-ra
 }
 .doc-nav-chip::after { content: ""; position: absolute; inset: -6px 0; }
 .doc-nav-chip:active { background: var(--c-today); border-color: var(--c-accent); color: var(--c-accent); }
+/* 当前所在的那一章：和 chip 的选中态同一套颜色 */
+.doc-nav-chip.on { background: var(--c-today); border-color: var(--c-accent); color: var(--c-accent); font-weight: 700; }
+
+/*
+ * 章末的翻章条。
+ * 放在正文末尾而不是固定底部：说明书是要"读完一章再走"的东西，
+ * 常驻一条底栏只会一直占着手机屏幕。
+ */
+.doc-foot {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 22px; padding-top: 14px; border-top: 1px solid var(--c-border);
+}
+.doc-foot .btn { max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .doc-lead {
   margin: 12px 0 0; padding: 10px 12px;

@@ -54,7 +54,8 @@ export default function PluginsPanel() {
     <Panel
       title="插件"
       sub={list.length + ' 个'}
-      desc="插件只提供「声明式」的扩展（目前是导出格式）：它告诉应用导出哪些列、导出哪一段，但不会执行任何第三方代码 —— 所以装任何插件，都不可能让应用做它本来不会做的事。"
+      collapsible
+      desc="插件只提供「声明式」的扩展（目前只有导出格式）：它告诉应用导出哪些列、导出哪一段，不会执行任何第三方代码。"
     >
       {list.map(function (p) {
         const active = p.enabled && p.manifest.permissions.every(function (n) { return p.granted.indexOf(n) >= 0; });

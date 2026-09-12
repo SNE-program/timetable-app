@@ -186,7 +186,7 @@ export default function DeviceCheckPanel(props: { n?: NotifierStatus | null; rel
 
       <div className="panel-desc" style={{ paddingTop: 4 }}>
         {native
-          ? '任何一条没通过，都值得去「后台提醒可靠性」里检查电池优化与自启动设置 —— 那两项不放行的话，国产 ROM 会在后台冻结应用，闹钟自然就哑了。'
+          ? '任何一条没通过，都值得去「设置 → 提醒 → 排程与可靠性」里检查电池优化与自启动设置 —— 那两项不放行的话，国产 ROM 会在后台冻结应用，闹钟自然就哑了。'
           : '网页版的提醒依赖页面保持打开，所以「关掉页面」那一条永远打不上勾 —— 那条写在这里，是为了让你在考前就知道该开着哪个页面。'}
       </div>
     </Panel>

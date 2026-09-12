@@ -23,6 +23,7 @@ import ErrorBoundary from './ui/ErrorBoundary';
 if (typeof window !== 'undefined'
   && (window.location.search.indexOf('diag=1') >= 0
     || window.location.search.indexOf('framecheck=1') >= 0
+    || window.location.search.indexOf('perf') >= 0
     || window.location.search.indexOf('behavecheck') >= 0)) {
   runDiagnostics();
 }
@@ -55,11 +56,17 @@ void (async function boot() {
   /*
    * 老角色包补一次真实帧数。
    *
-   * 放在首屏渲染之后、而且延迟 1.5 秒：它要解码一张逐帧图再数格子，
-   * 早跑会和首屏抢解码器。`repairMascotFrames` 自己会判断"要不要改"，
-   * 没得改（新包、静态图、量不到）就原地返回，不会写任何东西。
+   * 它要解码一张逐帧图再数格子 —— 那是启动路径上唯一一处图像解码，
+   * 所以放在**空闲时**做（requestIdleCallback，退化到 2.5 秒后）。
+   * `repairMascotFrames` 自己会判断"要不要改"：新包、静态图、量不到都原地返回，
+   * 一个字节都不写。
    */
-  window.setTimeout(function () { void repairMascotFrames(); }, 1500);
+  const repair = function (): void { void repairMascotFrames(); };
+  try {
+    const ric = (window as unknown as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number }).requestIdleCallback;
+    if (typeof ric === 'function') ric(repair, { timeout: 4000 });
+    else window.setTimeout(repair, 2500);
+  } catch (e) { window.setTimeout(repair, 2500); }
 
   const el = document.getElementById('root');
   if (el) {

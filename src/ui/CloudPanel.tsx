@@ -36,15 +36,14 @@ export default function CloudPanel() {
     <Panel
       title="云备份"
       sub={sub}
-      desc={'可选功能，默认关闭。不登录的话，这个应用与以前一样完全离线；登录之后，打开应用会自动续一次'
-        + '登录状态（一次很轻的请求），其余时候只有你按按钮才会联网。备份存在项目自己的服务器上（'
-        + cloudServerHost() + '），不经过任何第三方。'}
+      desc={'可选功能。不登录就完全离线；登录之后也只有你按按钮才会联网（打开应用时会安静续一次登录状态）。'
+        + '备份存在项目自己的服务器（' + cloudServerHost() + '）上，不经过任何第三方。'}
     >
       <SwitchRow
         label="打开时自动登录"
         sub={s.prefs.autoLogin !== false
-          ? '登录状态存在本机，下次打开应用自动续上（会发一次很轻的续期请求）；关掉之后下次打开需要重新输入密码'
-          : '已关闭：下次打开应用需要重新登录。本次仍然登录着，本机数据不受影响'}
+          ? '登录状态存本机，下次打开自动续上；关掉之后下次打开要重新输密码'
+          : '已关闭：下次打开需要重新登录（本次仍登录着，本机数据不受影响）'}
         on={s.prefs.autoLogin !== false}
         onChange={function (v) { patchPrefs({ autoLogin: v }); }}
       />
@@ -75,9 +74,7 @@ export default function CloudPanel() {
           <div className="list-row tap" style={{ cursor: 'pointer' }} onClick={function () { void cloudMailWeek(); }}>
             <div>
               <div className="lr-label">把本周课表发到我的邮箱</div>
-              <div className="lr-sub">
-                用 Resend 发一封纯文本邮件，只可能发到你自己这个地址；正文由本机算好后交给服务端
-              </div>
+              <div className="lr-sub">纯文本邮件，只可能发到你自己这个地址；正文由本机算好后交给服务端</div>
             </div>
             <div className="lr-right">{c.busy === 'mail' ? '发送中…' : '›'}</div>
           </div>
@@ -149,9 +146,9 @@ export default function CloudPanel() {
       ) : null}
 
       <div className="panel-desc" style={{ paddingTop: 8 }}>
-        备份里包括：课表与时段、任务、出勤、学期与作息、提醒规则、外观，以及这些数据用到的图片；
-        <b>不包括角色</b>（它有自己的角色包文件，请单独带走）。图片太大时只备份课表与设置，届时会明确提示。
-        恢复会覆盖本机并记一步历史，可以撤销。
+        备份包括课表、任务、出勤、学期与作息、提醒规则、外观及用到的图片；
+        <b>不包括角色</b>（用角色包单独带走）。图片太大时会退成"不含图片"并明确提示。
+        恢复会覆盖本机，但会记一步历史，可以撤销。
       </div>
     </Panel>
   );
