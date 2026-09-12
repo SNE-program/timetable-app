@@ -61,6 +61,7 @@
 | --- | --- |
 | 版本 | versionCode **62** / versionName **1.9.1** |
 | 主要改动 | `src/mascot/placement.ts`、`src/mascot/motion.ts`、`src/ui/Mascot.tsx`、`src/ui/MascotArt.tsx`、`src/app/diagnostics.ts`、说明书与角色包规范 |
+| Android | `课表助手-v1.9.1.apk` · 9.23 MB（9,683,683 字节）· SHA-256 `DDFFB95DD3C52484FFB91F403E829A5261714CF2FFD8AFFDC987E81011B999E9` · 由 tag `v1.9.1` 触发的 CI 构建 · 与前几版同一张证书 |
 
 ---
 
