@@ -21,7 +21,7 @@ function demoPrefs(): Parameters<typeof buildBackup>[0]['prefs'] {
   return {
     reminderOffsets: [15, 5], dailyBrief: true, briefHour: 21,
     studioLocked: true, confirmDestructive: true,
-    permissionAsked: true, privacySeen: true, debug: true,
+    permissionAsked: true, privacySeen: true, autoCheckUpdate: true, debug: true,
     mascot: { size: 140, x: 0.8, y: 0.6, fps: 0, facing: 'right', hidden: false },
   };
 }

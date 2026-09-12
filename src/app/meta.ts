@@ -32,6 +32,30 @@ export const DOWNLOAD_PAGE = './download/';
  */
 export const PUBLIC_SITE_URL = 'https://timble.bond/';
 
+/**
+ * 检查更新去看的那个清单。
+ *
+ * **安卓里必须用远端地址**：应用内那份 latest.json 是"装机那一刻"的副本，
+ * 拿它比版本号永远比不出新版本（这份文件本身不会更新）。网页版相反 ——
+ * 它每次打开都是从服务器现取的，所以相对路径就是最新的一份。
+ *
+ * 第一个能取到的就用：github.io 的地址今天就能用；换成自定义域名之后，
+ * 它会被 302 到 timble.bond，fetch 会自动跟随，所以两个都留着更稳。
+ */
+export const UPDATE_MANIFEST_URLS: string[] = [
+  'https://sne-program.github.io/timetable-app/latest.json',
+  PUBLIC_SITE_URL + 'latest.json',
+];
+
+export function updateManifestUrls(): string[] {
+  try {
+    if (isNativePlatform()) return UPDATE_MANIFEST_URLS;
+    return ['./latest.json'];
+  } catch (e) {
+    return UPDATE_MANIFEST_URLS;
+  }
+}
+
 export function emailRedirectUrl(): string {
   try {
     if (isNativePlatform()) return PUBLIC_SITE_URL;

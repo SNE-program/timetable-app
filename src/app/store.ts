@@ -46,6 +46,9 @@ import {
 } from '../cloud/mascots';
 import { loadSession, saveSession, freshToken } from '../cloud/session';
 import { cloudConfigured, cloudHost } from '../cloud/config';
+import { checkForUpdate, updateSummary, type CheckResult } from './update';
+import { updateManifestUrls } from './meta';
+import { canInstallApk, downloadAndInstallApk, openInstallSettings } from '../platform/appUpdate';
 import { emailRedirectUrl } from './meta';
 import { isNativePlatform } from '../platform/nativeBridge';
 import { APP_VERSION } from './version';
@@ -73,6 +76,8 @@ export interface Prefs {
   permissionAsked: boolean;
   /** 是否已经看过首次启动的隐私说明 */
   privacySeen: boolean;
+  /** 启动时自动检查更新（默认开；只是读一个静态文件，可在设置里关掉） */
+  autoCheckUpdate: boolean;
   /**
    * 排查工具。开启后才显示诊断、检查、排程明细、存储占用这些排查用面板 ——
    * 它们对日常使用没有价值，却占了设置页一大半篇幅。
@@ -164,6 +169,8 @@ export interface AppState {
   upcoming: import('../platform/types').NotifyItem[];
   /** 云备份（可选功能）：没配置或没登录时，界面整块不出现 */
   cloud: CloudState;
+  /** 检查更新 */
+  update: UpdateState;
 }
 
 /* v2：默认不再内置占位课程，旧版本的演示数据通过换 key 自然作废 */
@@ -292,6 +299,7 @@ function loadPrefs(): Prefs {
         confirmDestructive: p.confirmDestructive === undefined ? true : !!p.confirmDestructive,
         permissionAsked: !!p.permissionAsked,
         privacySeen: !!p.privacySeen,
+        autoCheckUpdate: p.autoCheckUpdate === undefined ? true : !!p.autoCheckUpdate,
         debug: !!p.debug,
         mascot: loadMascotPrefs(p.mascot),
       };
@@ -303,6 +311,7 @@ function loadPrefs(): Prefs {
     /* 老用户升级上来不该被拦一屏 —— 只有真正的首次启动才弹。
        ?demo=1 是开发预览入口，也不该被这屏挡住。 */
     privacySeen: hasAnyLocalData() || wantDemo(),
+    autoCheckUpdate: true,
     /* ?debug=1 直接进排查工具，省得每次手点开关 */
     debug: wantDebug(),
     mascot: defaultMascotPrefs(),
@@ -609,6 +618,7 @@ function initialState(): AppState {
     notify: initialNotify(),
     upcoming: [],
     cloud: initialCloud(),
+    update: { checking: false, result: null, progress: null, error: '', sheet: false },
   };
 }
 
@@ -1960,6 +1970,106 @@ function deviceLabel(): string {
 export function cloudBackupLine(info: CloudBackupInfo | null): string {
   if (!info) return '云端还没有备份';
   return formatTime(info.updatedAt) + ' · ' + info.device + ' · ' + info.summary;
+}
+
+
+/* ============================================================================
+   检查更新（v1.8.0）
+   ----------------------------------------------------------------------------
+   网页版不需要它：每次打开都是服务器上最新的一份。
+   安卓版能自动检查、自动下载，但**最后一下「安装」必须用户点** ——
+   安卓不给普通应用静默安装自己的权力（那是应用商店 / 设备管理员才有的）。
+   能省掉的是"去浏览器下载、再翻文件管理器找安装包"这两步。
+
+   联网性质：只读自己站点上的一个静态文件（latest.json），不带任何标识；
+   可以在设置里整个关掉。失败了就说失败，不弹一堆东西骚扰。
+   ============================================================================ */
+
+export interface UpdateState {
+  checking: boolean;
+  result: CheckResult | null;
+  /** 下载进度 0–100；null 表示没在下 */
+  progress: number | null;
+  error: string;
+  sheet: boolean;
+}
+
+function setUpdate(patch: Partial<UpdateState>): void {
+  setState({ update: Object.assign({}, state.update, patch) });
+}
+
+/**
+ * 查一次。
+ * manual = 用户主动点的（失败要说出来、有新版本要打开面板）；
+ * 自动的只在新版本存在时轻提示一次 —— 不能每次启动都弹一个"已是最新"。
+ */
+export async function checkUpdateNow(manual: boolean): Promise<void> {
+  setUpdate({ checking: true, error: '' });
+  try {
+    const r = await checkForUpdate(APP_VERSION || '0.0.0', updateManifestUrls());
+    setUpdate({ checking: false, result: r });
+    if (r.kind === 'newer') {
+      setUpdate({ sheet: true });
+      showToast('发现新版本 ' + r.info.version, 'info');
+    } else if (manual) {
+      showToast(updateSummary(r), r.kind === 'error' ? 'warn' : 'ok');
+    }
+  } catch (e) {
+    const msg = (e as Error).message || '检查更新失败';
+    setUpdate({ checking: false, error: msg, result: { kind: 'error', message: msg } });
+    if (manual) showToast(msg, 'warn');
+  }
+}
+
+export function openUpdateSheet(): void { setUpdate({ sheet: true }); }
+export function closeUpdateSheet(): void { setUpdate({ sheet: false, progress: null }); }
+
+/** 界面用：一句话状态 */
+export function updateLine(): string {
+  if (state.update.checking) return '正在检查…';
+  const r = state.update.result;
+  if (!r) return isNativePlatform() ? '当前 v' + (APP_VERSION || '?') : '网页版每次打开就是最新版';
+  return updateSummary(r);
+}
+
+/**
+ * 下载并交给系统安装器。
+ *
+ * 两条前置检查都在这里做，而且**都用人话说清楚**：
+ *   1. 没有"安装未知应用"授权 → 直接把他送到那个设置页，而不是让他点了之后对着失败弹窗发愣；
+ *   2. 清单里没有下载地址（本地构建就是这样）→ 说清楚，不假装在下载。
+ */
+export async function installUpdate(): Promise<void> {
+  const info = state.update.result;
+  if (!info || info.kind !== 'newer') return;
+  const url = info.info.apkUrl || '';
+  if (!url) {
+    setUpdate({ error: '这个版本没有拿到安装包地址（多半是开发构建），请到项目主页的 Releases 里下载' });
+    return;
+  }
+  if (!isNativePlatform()) {
+    setUpdate({ error: '网页版不用手动更新：刷新一下就是最新版' });
+    return;
+  }
+  const perm = await canInstallApk();
+  if (perm && perm.allowed === false) {
+    const opened = await openInstallSettings();
+    setUpdate({ error: opened
+      ? '请先在系统页面里允许「安装未知应用」，然后回来再点一次更新'
+      : '请到系统设置 → 应用 → 课表助手 → 安装未知应用中允许' });
+    return;
+  }
+  setUpdate({ progress: 0, error: '' });
+  const r = await downloadAndInstallApk(url, 'timetable-app-' + info.info.version + '.apk', function (p) {
+    setUpdate({ progress: p });
+  });
+  if (!r.ok) {
+    setUpdate({ progress: null, error: r.error || '下载失败' });
+    showToast('下载失败：' + (r.error || '未知原因'), 'error');
+    return;
+  }
+  setUpdate({ progress: null });
+  showToast('安装包已下载，请在系统弹窗里点「安装」', 'ok');
 }
 
 /* ------------------------------ 其它动作 ------------------------------ */

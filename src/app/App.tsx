@@ -2,8 +2,8 @@ import React from 'react';
 import {
   closeSheets, dismissToast, importMascotPack, importMascotSheet, importThemeFromFile, jumpToDate, openAdd, openCourse,
   openMascotEditor, openSearch, openTask, patchMascotPrefs, patchPrefs, patchWallpaper, redo, removeMascot,
-  cloudFillProfile, openCloudSheet, resolveConfirm, setNotify, setNotifyStatus, setSystemDark, setTab, setWeek,
-  showToast, takeMigrateNotes, undo, useApp,
+  checkUpdateNow, cloudFillProfile, openCloudSheet, resolveConfirm, setNotify, setNotifyStatus, setSystemDark,
+  setTab, setWeek, showToast, takeMigrateNotes, undo, useApp,
 } from './store';
 import { cloudConfigured } from '../cloud/config';
 import { ConfirmDialog } from '../ui/common';
@@ -19,6 +19,7 @@ import { isVideoFile, videoToSpriteSheet } from '../theme/videoSheet';
 import ChangelogSheet from '../ui/ChangelogSheet';
 import PasswordSheet from '../ui/PasswordSheet';
 import CloudSheet from '../ui/CloudSheet';
+import UpdateSheet from '../ui/UpdateSheet';
 import { onNotified, syncReminders } from './reminderRuntime';
 import { watchSystemTimeChanges } from './rescheduleWatch';
 import { consumePendingOpen } from '../platform/widget';
@@ -216,6 +217,21 @@ export default function App() {
     if (!s.cloud.linkType) return;
     if (s.cloud.error) showToast(s.cloud.error, 'error');
     else if (s.cloud.session && !s.cloud.passwordSheet) showToast('邮箱已验证，已为你登录', 'ok');
+    /* eslint-disable-next-line react-hooks/exhaustive-deps -- 只在启动时看一次 */
+  }, []);
+
+  /*
+   * 启动时查一次更新（只在安卓版、且用户没关掉时）。
+   *
+   * 隔 4 秒再查：启动那几秒要留给课表渲染与提醒排程，不能跟它们抢带宽。
+   * 查到了只弹一条提示条 + 打开面板，不打断任何操作；查不到就什么都不做 ——
+   * "检查更新失败"这种事不该在每次启动时打扰用户。
+   */
+  React.useEffect(function () {
+    if (!isNativePlatform()) return;
+    if (s.prefs.autoCheckUpdate === false) return;
+    const id = window.setTimeout(function () { void checkUpdateNow(false); }, 4000);
+    return function () { window.clearTimeout(id); };
     /* eslint-disable-next-line react-hooks/exhaustive-deps -- 只在启动时看一次 */
   }, []);
 
@@ -539,6 +555,7 @@ export default function App() {
       {/* 设置新密码：从邮件里的「重置密码」链接回来时自动打开，也可以从云备份面板进 */}
       {s.cloud.passwordSheet ? <PasswordSheet /> : null}
       {s.cloud.sheet ? <CloudSheet /> : null}
+      {s.update.sheet ? <UpdateSheet /> : null}
       {s.manualSheet ? <ManualView /> : null}
       {s.changelogSheet ? <ChangelogSheet /> : null}
 

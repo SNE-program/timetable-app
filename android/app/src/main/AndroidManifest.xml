@@ -99,6 +99,12 @@
       该权限属于「可能有害应用」类别，是安全软件的高频误报点。
       需要时改为在应用内引导用户手动把本应用加入电池白名单。
     -->
+    <!--
+      应用内更新要下载安装包并交给系统安装器。
+      注意：这条权限只是"允许调起安装流程"，**装不装仍然是用户点一下** ——
+      安卓不允许普通应用静默安装自己的更新（那是应用商店 / 设备管理员才有的能力）。
+    -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- 重启后自动重排未来的提醒 -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.VIBRATE" />

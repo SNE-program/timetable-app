@@ -33,6 +33,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      # npm run build 里已经包含生成 dist/latest.json（应用内检查更新用它）
       - run: npm run build
         env:
           # 云备份（可选）。仓库 Settings → Secrets and variables → Variables 里配置；

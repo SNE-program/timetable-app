@@ -3,7 +3,7 @@ import {
   clearAllCourses, confirmDanger, exportIcsNow, exportThemeNow, importIcsFromFile, importTimetableFromFile,
   openChangelog, openExport, openImportSheet, openManual, openScheme, openShare, patchPrefs, setNotifyStatus,
   shareWeekImage, toastSave,
-  setReminderRule, setTerm, showToast, useApp,
+  setReminderRule, setTerm, showToast, updateLine, useApp, checkUpdateNow,
 } from '../app/store';
 import { getNotifier } from '../platform';
 import { saveTextFile } from '../platform/saveFile';
@@ -588,6 +588,22 @@ export default function SettingsView() {
           </div>
           <div className="lr-right">›</div>
         </div>
+        <div
+          className="list-row tap" style={{ cursor: 'pointer' }}
+          onClick={function () { void checkUpdateNow(true); }}
+        >
+          <div>
+            <div className="lr-label">检查更新</div>
+            <div className="lr-sub">{updateLine()}</div>
+          </div>
+          <div className="lr-right">{s.update.checking ? '…' : '›'}</div>
+        </div>
+        <SwitchRow
+          label="启动时自动检查更新"
+          sub="只读一个静态文件，不带任何标识；关掉之后应用不会再为这件事联网"
+          on={s.prefs.autoCheckUpdate !== false}
+          onChange={function (v) { patchPrefs({ autoCheckUpdate: v }); }}
+        />
         <div className="list-row tap" style={{ cursor: 'pointer' }} onClick={function () { patchPrefs({ privacySeen: false }); }}>
           <div>
             <div className="lr-label">隐私说明</div>

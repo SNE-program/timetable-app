@@ -11,6 +11,7 @@ public class MainActivity extends BridgeActivity {
         // 本地插件必须在 super.onCreate 之前注册
         registerPlugin(ReliabilityPlugin.class);
         registerPlugin(WidgetPlugin.class);
+        registerPlugin(UpdatePlugin.class);
         super.onCreate(savedInstanceState);
         // 从桌面小组件点进来时，Intent 里带着要打开的课程
         PendingOpen.fromIntent(this, getIntent());
