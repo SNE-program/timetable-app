@@ -488,7 +488,7 @@ export function runDiagnostics(): void {
     const ALLOW_WRAP = /(^|\s)(desc|lr-sub|note|hint|body|paragraph|msg|text-block)(\s|$)|^(P|LI|TD)$/;
     /* 说明书/更新日志是**文档**，正文本来就该换行。不排除掉的话，
        一次 320px 的检查会刷出七十多条"本该一行放下"的假阳性。 */
-    const PROSE = /(^|\s)(doc-p|doc-lead|doc-note|doc-a|doc-step-d|doc-q|log-text|log-title)(\s|$)/;
+    const PROSE = /(^|\s)(doc-p|doc-lead|doc-note|doc-a|doc-step-d|doc-q|log-text|log-title|panel-desc|check-how)(\s|$)/;
     /**
      * 断行检测：把元素整份克隆到一个 nowrap + max-content 的离屏容器里量一次，
      * 得到"这一行字本需要多宽"，再跟它实际拿到的宽度比。
@@ -742,6 +742,52 @@ export function runDiagnostics(): void {
     out.push('ROOT ' + (rootLen < 0 ? 'missing'
       : (rootLen < 200 ? 'EMPTY(' + rootLen + ') 渲染崩了' : 'ok(' + rootLen + ')')));
     out.push('PLATFORM ' + platformName());
+
+    /*
+     * 电脑布局的实测数据。
+     *
+     * 宽屏那套样式是"整块只在 .app.wide 下生效"的，靠肉眼看截图分不出
+     * "样式没生效" 和 "元素本来就在那儿" —— 所以量出来：
+     * 侧边栏多宽、内容区多宽、课表网格多宽、设置页排了几列、弹层是不是居中的方块。
+     */
+    const wideApp = doc.querySelector('.app.wide');
+    if (wideApp) {
+      const nav = doc.querySelector('.tabbar') as HTMLElement | null;
+      const content = doc.querySelector('.content') as HTMLElement | null;
+      const grid = doc.querySelector('.week-grid') as HTMLElement | null;
+      const twoCol = doc.querySelector('.content-inner.two-col') as HTMLElement | null;
+      const sheet = doc.querySelector('.sheet') as HTMLElement | null;
+      const box = function (el: HTMLElement | null): string {
+        if (!el) return 'none';
+        const r = el.getBoundingClientRect();
+        return Math.round(r.width) + 'x' + Math.round(r.height) + '@' + Math.round(r.left) + ',' + Math.round(r.top);
+      };
+      /*
+       * 列数不能读 columnCount —— 用的是 column-width（写死列数会把窄窗口挤爆），
+       * 它算出来永远是 auto。所以数一下直接子元素落在几个不同的左边界上，
+       * 那就是真实排出来的列数。
+       */
+      let cols = '-';
+      if (twoCol) {
+        /* 分列作用在里面那一层（外层只有一个子 div），所以取的是它的子元素 */
+        const flow = (twoCol.children.length === 1 && twoCol.children[0].children.length > 1)
+          ? twoCol.children[0] : twoCol;
+        const seen: Record<number, boolean> = {};
+        for (let i = 0; i < flow.children.length; i++) {
+          seen[Math.round((flow.children[i] as HTMLElement).getBoundingClientRect().left)] = true;
+        }
+        cols = String(Object.keys(seen).length);
+        out.push('DESKTOP-COLS panels=' + flow.children.length + ' cols=' + cols);
+      }
+      out.push('DESKTOP nav=' + box(nav) + ' content=' + box(content)
+        + ' grid=' + box(grid) + ' sheet=' + box(sheet)
+        + ' panels=' + (twoCol ? twoCol.children.length : 0) + ' cols=' + cols
+        + ' brand=' + !!doc.querySelector('.tab-brand')
+        + ' get=' + !!doc.querySelector('.tab-get')
+        + ' rowH=' + win.getComputedStyle(wideApp).getPropertyValue('--row-h').trim());
+    } else {
+      out.push('DESKTOP off');
+    }
 
     /*
      * ?text=选择器 —— 把匹配到的可见文字回传。

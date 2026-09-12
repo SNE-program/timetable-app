@@ -158,6 +158,57 @@ input[type="range"].rng::-moz-range-thumb { width: 12px; height: 12px; border-ra
 @keyframes sheetUp { from { transform: translateY(4%); opacity: .5; } to { transform: translateY(0); opacity: 1; } }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
+/* ============================================================
+   电脑（宽屏）下的弹层与多列布局（配合 base.css 末尾那一块）
+   ============================================================ */
+
+/*
+ * 设置 / 外观页：宽屏下按列排。
+ * 用 column-width 而不是写死两列 —— 窗口再宽会自动变三列，
+ * 面板高度不一致时也不会把一行拉到和最高的那个一样高（grid 的毛病）。
+ */
+/*
+ * 注意分列要加在**里面那一层**：设置页的结构是
+ * .content-inner > div（各视图的根）> .panel…
+ * 加在外层的话，那个唯一的子 div 自己就是一列，永远不会分栏（实测 panels=1 cols=1）。
+ */
+.app.wide .content-inner.two-col > * { columns: 380px; column-gap: 16px; }
+.app.wide .content-inner.two-col > * > * { break-inside: avoid; }
+
+/*
+ * 底部弹层 → 居中对话框。
+ * 手机上从底部升起来是对的（拇指够得着），电脑上从底部升起一个 88vh 的抽屉
+ * 会显得很怪，而且鼠标要跑很远。这里只改定位与尺寸，内部结构完全不动。
+ */
+.app.wide .sheet {
+  left: 50%; right: auto; bottom: auto; top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(660px, calc(100vw - 72px));
+  max-height: min(84dvh, 920px);
+  border-radius: 12px;
+  border-top: 1px solid var(--c-border);
+  border: 1px solid var(--c-border);
+  padding-bottom: 0;
+  /* 动画是"从下往上"，居中之后再用它会在开头瞬间把弹层推到画面外 */
+  animation: none;
+}
+.app.wide .sheet.sheet-doc,
+.app.wide .sheet.sheet-full {
+  top: 50%; left: 50%;
+  width: min(960px, calc(100vw - 72px));
+  max-height: min(90dvh, 1040px);
+  border-radius: 12px;
+  border-top: 1px solid var(--c-border);
+}
+/* 手机上那根"可以往下拖"的把手，电脑上不需要 */
+.app.wide .sheet-grip { display: none; }
+.app.wide .sheet-head { padding: 15px 22px 13px; }
+.app.wide .sheet-body { padding: 16px 22px 22px; }
+.app.wide .sheet-doc .sheet-body { padding: 0 22px 24px; }
+
+/* 提示条：底下没有标签栏了 */
+.app.wide .toast { bottom: 26px; }
+
 /* 提示条 */
 .toast {
   position: fixed; left: 50%; transform: translateX(-50%);

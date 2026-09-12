@@ -3,7 +3,7 @@ import { Panel } from './common';
 import { showToast, useApp } from '../app/store';
 import { pushWidgetData } from '../platform/widget';
 import { isNativePlatform } from '../platform/nativeBridge';
-import { ANDROID_RELEASE_URL } from '../app/meta';
+import { DOWNLOAD_PAGE } from '../app/meta';
 
 /**
  * 桌面小组件说明与手动同步。
@@ -56,17 +56,11 @@ export default function WidgetPanel() {
             </div>
           </div>
         </div>
-        {ANDROID_RELEASE_URL ? (
-          <div className="check-actions" style={{ borderTop: 0, paddingTop: 4 }}>
-            <a
-              className="btn sm primary"
-              href={ANDROID_RELEASE_URL}
-              target="_blank"
-              rel="noreferrer noopener"
-            >获取 Android 版</a>
-            <span className="panel-desc" style={{ padding: '0 0 0 10px' }}>会在新标签页打开项目主页</span>
-          </div>
-        ) : null}
+        {/* 指向站内的下载页：那一页有安装步骤与直接下载按钮，比直接甩一个 Releases 链接友好 */}
+        <div className="check-actions" style={{ borderTop: 0, paddingTop: 4 }}>
+          <a className="btn sm primary" href={DOWNLOAD_PAGE}>获取 Android 版</a>
+          <span className="panel-desc" style={{ padding: '0 0 0 10px' }}>安装包与安装步骤都在那一页</span>
+        </div>
       </Panel>
     );
   }

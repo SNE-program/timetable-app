@@ -36,6 +36,10 @@ import CourseSheet from '../ui/CourseSheet';
 import CourseEditor from '../ui/CourseEditor';
 import { processImageFile } from '../theme/image';
 import { Icon } from '../ui/icons';
+import { useWideLayout } from '../ui/useWideLayout';
+import { APP_VERSION } from './version';
+import { DOWNLOAD_PAGE } from './meta';
+import { isNativePlatform } from '../platform/nativeBridge';
 
 const TABS = [
   { key: 'week', icon: 'calendar', label: '本周' },
@@ -47,6 +51,8 @@ const TABS = [
 
 export default function App() {
   const s = useApp();
+  /* 电脑（宽屏）布局：只在浏览器里、且窗口足够宽时打开，见 useWideLayout 的注释 */
+  const wide = useWideLayout();
   const [dragging, setDragging] = React.useState(false);
   const stripRef = React.useRef<HTMLDivElement>(null);
   const activePillRef = React.useRef<HTMLButtonElement>(null);
@@ -155,19 +161,37 @@ export default function App() {
   }, []);
 
   /* 键盘快捷键：Ctrl/Cmd+Z 撤销，Ctrl+Shift+Z 或 Ctrl+Y 重做。
-     焦点在输入框里时让给浏览器自带的文本撤销，别抢。 */
+     焦点在输入框里时让给浏览器自带的文本撤销，别抢。
+
+     电脑上再补一组导航键：←/→ 翻周、1–5 切页、/ 搜索。
+     手机上没有物理键盘，也就在电脑布局（wide）下才挂这几个键 ——
+     这样 Android 上的键盘行为与之前完全一致。 */
   React.useEffect(function () {
+    function inField(el: EventTarget | null): boolean {
+      const t = el as HTMLElement | null;
+      if (!t) return false;
+      return t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable;
+    }
     function onKey(e: KeyboardEvent): void {
-      if (!(e.ctrlKey || e.metaKey)) return;
-      const el = e.target as HTMLElement | null;
-      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
-      const k = e.key.toLowerCase();
-      if (k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
-      else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); redo(); }
+      if (inField(e.target)) return;
+      if (e.ctrlKey || e.metaKey) {
+        const k = e.key.toLowerCase();
+        if (k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+        else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); redo(); }
+        return;
+      }
+      if (!wide || e.altKey) return;
+      if (e.key === 'ArrowLeft') { e.preventDefault(); setWeek(s.week - 1); return; }
+      if (e.key === 'ArrowRight') { e.preventDefault(); setWeek(s.week + 1); return; }
+      if (e.key === '/') { e.preventDefault(); openSearch(); return; }
+      if (e.key >= '1' && e.key <= '5') {
+        const t = TABS[Number(e.key) - 1];
+        if (t) { e.preventDefault(); setTab(t.key); }
+      }
     }
     window.addEventListener('keydown', onKey);
     return function () { window.removeEventListener('keydown', onKey); };
-  }, []);
+  }, [wide, s.week]);
 
   /* 数据迁移过就提示一次 */
   React.useEffect(function () {
@@ -290,7 +314,7 @@ export default function App() {
   if (!s.prefs.privacySeen) return <Welcome />;
 
   return (
-    <div className="app">
+    <div className={wide ? 'app wide' : 'app'}>
       <div className="wallpaper" />
       <div className="wallpaper-scrim" />
 
@@ -351,7 +375,10 @@ export default function App() {
             ) : null}
           </div>
 
-          <div className={tab === 'week' ? 'content-inner flush' : 'content-inner'}>
+          <div className={
+            (tab === 'week' ? 'content-inner flush' : 'content-inner')
+            + (wide && (tab === 'settings' || tab === 'studio') ? ' two-col' : '')
+          }>
             {tab === 'week' ? <WeekView /> : null}
             {tab === 'today' ? <TodayView /> : null}
             {tab === 'tasks' ? <TaskView /> : null}
@@ -368,6 +395,19 @@ export default function App() {
         ) : null}
 
         <div className="tabbar">
+          {/*
+            电脑上侧边栏顶部的品牌块。手机上这块是 display:none ——
+            标签栏用的是 grid-auto-flow: column，隐藏的元素不占格子，
+            所以手机端的五个标签位置一个像素都不会变。
+          */}
+          <div className="tab-brand">
+            <div className="tab-brand-mark">课</div>
+            <div>
+              <div className="tab-brand-name">课表助手</div>
+              <div className="tab-brand-sub">本地优先 · 无广告</div>
+            </div>
+          </div>
+
           {TABS.map(function (t) {
             return (
               <button
@@ -383,6 +423,14 @@ export default function App() {
               </button>
             );
           })}
+
+          {/* 侧边栏底部：安卓安装包入口与版本号。手机上整块隐藏 */}
+          <div className="tab-foot">
+            {!isNativePlatform() ? (
+              <a className="tab-get" href={DOWNLOAD_PAGE}>获取 Android 版</a>
+            ) : null}
+            <div className="tab-ver">v{APP_VERSION || '?'}</div>
+          </div>
         </div>
       </div>
 

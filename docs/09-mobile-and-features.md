@@ -3589,6 +3589,71 @@ const today = todayISO();   // ← 真实的今天，而不是传入的 now
 
 
 
+## 九、电脑适配与下载页（v1.5.0）
+
+这一版只做两件事，都发生在「外壳」层：网页版在电脑上真正变成桌面布局；「去哪装 App」变成一条路径。
+手机端一行样式没改 —— 改手机布局是最容易把老用户惹毛的事，所以整块桌面样式都挂在 `.app.wide` 下。
+
+### 1. 判断条件为什么不放在 CSS 里
+
+同一份代码在 Android 壳里跑，平板横屏同样超过 1024px，而那种情况必须保留底部标签栏。
+媒体查询分不出「电脑」和「安卓平板」，所以 `src/ui/useWideLayout.ts` 用的是
+**宽度 ≥1024px 且 `isNativePlatform()` 为假**，并用 `matchMedia` 订阅变化 —— 拉窗口实时切换，不用刷新。
+
+| | 手机 | 电脑 |
+| --- | --- | --- |
+| 外壳 | `flex column`：顶栏 / 内容 / 标签栏 | `grid-template-columns: 236px minmax(0,1fr)` |
+| 导航 | 底部五格（`grid-auto-flow: column`）| 左侧竖排，多出品牌块与底部下载入口（手机端 `display:none`，不占格子）|
+| 课表 | 行高 68px / 节次轴 44px | 行高 92px / 节次轴 58px（直接改 `.app.wide` 上的 CSS 变量）|
+| 设置与外观 | 单列 | `columns: 380px` 自动分列 |
+| 弹层 | 底部抽屉 | 居中对话框 |
+
+### 2. 两个只有量了才知道的坑
+
+**分列加错了层**。第一版把 `columns` 写在 `.content-inner.two-col` 上，
+而设置页的真实结构是 `.content-inner > div（视图根）> .panel…` ——
+外层只有一个子元素，那个子元素自己就是一列，于是永远只有一列。改成 `> *` 之后：
+`panels=17 cols=2`（设置）、`panels=9 cols=2`（外观）。
+
+**弹层动画必须关掉**。`sheetUp` 是「从下往上 4%」，居中之后再用它，
+开场那一帧会把对话框推到画面外（`transform` 被动画覆盖）。所以 `.app.wide .sheet` 里写了 `animation: none`。
+
+### 3. 新增 `DESKTOP` 自检行
+
+宽屏样式整块挂在 `.app.wide` 下，看截图分不出「样式没生效」和「元素本来就在那儿」。
+所以量出来：导航与内容区的矩形、课表网格尺寸、面板数与真实列数（数直接子元素的左边界个数 ——
+`columnCount` 在 `column-width` 模式下永远是 `auto`）、弹层矩形、品牌块与下载入口是否存在、行高变量。
+没命中时输出 `DESKTOP off`，手机端就该是这一行。
+
+实测：1280/1440/1920 下 `nav=236x…@0,0`、`content=…@236,0`、
+`grid=1034/1194/1674x1114`、`rowH=92px`、`OVERFLOW 0`、`WRAP 0`；
+说明书弹层 960×1040@160,792（1280 视口里水平居中、垂直居中）；
+手机 320/360/390 与平板 1023 全部 `DESKTOP off`，指标与上一版一致。
+
+### 4. 下载页
+
+`public/download/index.html` —— 静态页，不经过 React，发布到 `/download/`。
+为什么单独做一页：同学拿到的是一个链接，这一页要立刻给出安装包与安装步骤，
+而不是先等 650KB 的应用包加载完、再让人自己去「设置 → 关于」里找。
+
+按钮指向 `releases/latest/download/timetable-app.apk` —— 这要求每次发版**同时上传一个固定名字的附件**；
+版本化的 `timetable-app-vX.Y.Z.apk` 留档。两个文件内容相同，只是名字不同。
+应用内所有「获取 Android 版」改成指向 `DOWNLOAD_PAGE`（相对路径 `./download/`），
+它随构建产物一起发布，因此在任何构建里都存在 —— 不像 `ANDROID_RELEASE_URL` 那样「没配仓库地址就是空」。
+
+### 5. 交付
+
+| 项目 | 结果 |
+| --- | --- |
+| 版本 | versionCode **51** / versionName **1.5.0** |
+| 新增文件 | `src/ui/useWideLayout.ts`、`public/download/index.html` |
+| 单测 | 455 通过 / 23 文件；`tsc --noEmit` 0 错误 |
+| Android | `课表助手-v1.5.0.apk` · 9.21 MB · SHA-256 `B48ACEA9CAA5368787D1C7BE7F405C4FEE5D93E7FE29409C36A07D1D4FD09973` · Defender `found no threats` |
+
+
+
+
+
 
 
 

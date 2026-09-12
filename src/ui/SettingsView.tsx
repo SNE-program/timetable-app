@@ -16,7 +16,7 @@ import PluginsPanel from './PluginsPanel';
 import WidgetPanel from './WidgetPanel';
 import WebReminderPanel from './WebReminderPanel';
 import { isNativePlatform } from '../platform/nativeBridge';
-import { ANDROID_RELEASE_URL } from '../app/meta';
+import { DOWNLOAD_PAGE } from '../app/meta';
 import DebugSection from './DebugSection';
 
 const REMIND_OPTIONS = [30, 15, 10, 5];
@@ -590,13 +590,10 @@ export default function SettingsView() {
           </div>
           <div className="lr-right">›</div>
         </div>
-        {!isNativePlatform() && ANDROID_RELEASE_URL ? (
-          <a
-            className="list-row tap" style={{ cursor: 'pointer' }}
-            href={ANDROID_RELEASE_URL} target="_blank" rel="noreferrer noopener"
-          >
+        {!isNativePlatform() ? (
+          <a className="list-row tap" style={{ cursor: 'pointer' }} href={DOWNLOAD_PAGE}>
             <div>
-              <div className="lr-label">Android 版</div>
+              <div className="lr-label">获取 Android 版</div>
               <div className="lr-sub">需要关掉也能提醒，或者想要桌面小组件，就装这个版本；数据可以导出带走</div>
             </div>
             <div className="lr-right">›</div>

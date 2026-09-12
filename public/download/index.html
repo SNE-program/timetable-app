@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>下载课表助手 · Android 版</title>
+<meta name="description" content="课表助手 Android 版下载：本地优先的大学课表与上课提醒，不联网、无广告、数据只在本机。" />
+<meta name="color-scheme" content="light dark" />
+<!--
+  独立的下载页（不经过 React）。
+  为什么单独做一页：同学拿到的是一个链接，这个链接应该直接给出安装包与安装步骤，
+  而不是先让人打开应用再自己找「设置 → 关于」。地址是 <站点>/download/。
+  换仓库时要改下面 3 个 github.com/... 地址。
+-->
+<style>
+  :root {
+    --bg: #F4F5F7; --surface: #FFFFFF; --text: #1D2129; --muted: #86909C;
+    --border: #E5E6EB; --accent: #1677FF; --on-accent: #FFF; --danger: #F53F3F;
+    --shadow: 0 6px 20px rgba(0,0,0,.10); --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17181A; --surface: #202124; --text: #E8EAED; --muted: #9AA0A6;
+      --border: #2E3034; --accent: #4C8DFF; --on-accent: #0B0C0E;
+      --shadow: 0 6px 24px rgba(0,0,0,.5);
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 680px; margin: 0 auto; padding: 40px 20px 64px; }
+  .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 26px; }
+  .mark {
+    width: 46px; height: 46px; border-radius: 10px; flex: 0 0 auto;
+    background: var(--accent); color: var(--on-accent);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px; font-weight: 700;
+  }
+  h1 { font-size: 23px; margin: 0; letter-spacing: -.3px; }
+  .tag { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .lede { color: var(--muted); font-size: 14px; margin: 0 0 22px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 18px; margin-bottom: 14px; box-shadow: var(--shadow);
+  }
+  .btn {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    height: 48px; border-radius: 8px; text-decoration: none;
+    background: var(--accent); color: var(--on-accent);
+    font-size: 16px; font-weight: 700; border: 1px solid transparent;
+  }
+  .btn:active { opacity: .88; }
+  .btn.secondary {
+    background: transparent; color: var(--text); border-color: var(--border);
+    height: 42px; font-size: 14px; font-weight: 600; margin-top: 10px;
+  }
+  .btn.web { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+  h2 { font-size: 15px; margin: 0 0 10px; }
+  ol, ul { margin: 0; padding-left: 20px; }
+  li { margin-bottom: 7px; }
+  .kv { display: flex; gap: 10px; font-size: 12.5px; padding: 5px 0; border-bottom: 1px dashed var(--border); }
+  .kv:last-child { border-bottom: 0; }
+  .kv b { flex: 0 0 84px; font-weight: 600; color: var(--muted); }
+  .kv span { flex: 1 1 auto; word-break: break-all; }
+  code, .mono { font-family: var(--mono); font-size: 12px; }
+  .note { font-size: 12.5px; color: var(--muted); margin-top: 10px; }
+  .warn { color: var(--danger); }
+  footer { color: var(--muted); font-size: 12.5px; text-align: center; margin-top: 26px; }
+  footer a { color: var(--muted); }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="brand">
+    <div class="mark">课</div>
+    <div>
+      <h1>下载课表助手</h1>
+      <div class="tag">本地优先 · 无广告 · 无追踪</div>
+    </div>
+  </div>
+
+  <p class="lede">
+    大学课表与上课提醒。装 Android 版之后，提醒交给系统闹钟 —— 息屏、关掉应用、重启手机之后照样响，
+    桌面上还能放一个小组件。不想装也可以用网页版，两边数据互通。
+  </p>
+
+  <div class="card">
+    <a class="btn" href="https://github.com/SNE-program/timetable-app/releases/latest/download/timetable-app.apk">
+      下载 Android 安装包（APK）
+    </a>
+    <a class="btn secondary" href="https://github.com/SNE-program/timetable-app/releases/latest">
+      查看所有版本与更新说明
+    </a>
+    <a class="btn secondary web" href="../">
+      直接用网页版（不用安装）
+    </a>
+    <div class="note">
+      下载按钮永远指向最新一版。安装包约 9.2 MB，支持 Android 8 及以上。
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>怎么装</h2>
+    <ol>
+      <li>点上面的按钮下载 APK（手机浏览器里点也可以，会存到「下载」目录）。</li>
+      <li>点开这个文件安装。系统可能提示「未知来源应用」—— 允许一次即可，装完可以关掉这个开关。</li>
+      <li>首次打开会有一页隐私说明，读完点「知道了，开始用」。</li>
+      <li>建议允许通知权限，否则课前提醒不会响；设置里随时能看到权限的真实状态。</li>
+    </ol>
+    <div class="note">
+      装不上或提示「应用未安装」：多半是手机上装过别的签名的同款应用，先卸载旧版再装；
+      升级安装不会丢数据（签名一致）。
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>当前版本</h2>
+    <div class="kv"><b>版本</b><span>v1.5.0（versionCode 51）</span></div>
+    <div class="kv"><b>文件大小</b><span>9.21 MB（9,659,571 字节）</span></div>
+    <div class="kv"><b>SHA-256</b><span class="mono">B48ACEA9CAA5368787D1C7BE7F405C4FEE5D93E7FE29409C36A07D1D4FD09973</span></div>
+    <div class="kv"><b>兼容</b><span>Android 8.0 及以上（arm64 / armeabi-v7a）</span></div>
+    <div class="note">
+      校验方法：在电脑上运行 <code>certutil -hashfile 文件名 SHA256</code>（Windows）或
+      <code>shasum -a 256 文件名</code>（macOS / Linux），结果应与上面一致。
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>网页版有的人也有，网页版没有的也有</h2>
+    <ul>
+      <li><b>Android 版多出来的</b>：系统闹钟提醒（关掉应用也响）、桌面小组件 2×2 / 4×2。</li>
+      <li><b>网页版多出来的</b>：打开链接就能用，电脑上也能看课表、记作业。</li>
+      <li><b>两边都一样</b>：课表、任务、出勤、导入导出、外观 DIY、角色。</li>
+      <li><b>数据互通</b>：一端「设置 → 课表数据 → 导出课表数据」，另一端「导入课表数据」即可。</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>隐私</h2>
+    <ul>
+      <li>数据只存在你自己的设备上，不上传、不联网、不需要注册账号。</li>
+      <li>不含任何广告与统计 SDK；整个应用没有任何一处会发起网络请求。</li>
+      <li>随时可以导出完整数据带走，也可以直接卸载清除。</li>
+    </ul>
+  </div>
+
+  <footer>
+    <a href="https://github.com/SNE-program/timetable-app">项目主页</a> ·
+    遇到问题或想提建议，在项目主页开一个 Issue 就行
+  </footer>
+
+</div>
+</body>
+</html>

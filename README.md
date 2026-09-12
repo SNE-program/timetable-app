@@ -7,7 +7,8 @@
 
 | | Android 版（app.timetable.mobile） | 网页版 |
 | --- | --- | --- |
-| 怎么拿到 | 在 Releases 下载安装包（`timetable-app-vX.Y.Z.apk`） | 打开网址，不用安装 |
+| 怎么拿到 | 下载页 **<https://sne-program.github.io/timetable-app/download/>**（或 Releases） | 打开网址，不用安装 |
+| 电脑上 | 应用内布局（平板横屏也是手机版式） | 自动切换成桌面布局：左侧导航 + 宽课表 + 两列设置 + 居中弹层，另有键盘快捷键 |
 | 提醒 | **系统闹钟**：息屏、关掉应用、重启手机之后照样响 | 页面内的通知：**页面保持打开时**准时响 |
 | 桌面小组件 | 2×2 / 4×2 | 没有（浏览器无法往桌面放东西） |
 | 数据存放 | 应用本地存储 + 内置数据库（存图片） | 浏览器本地存储，约 5 MB |
@@ -21,13 +22,13 @@ TypeScript + React + Vite，Android 由 Capacitor 打包。
 
 **网页版（最省事）**
 
-1. 打开 `https://<用户名>.github.io/<仓库名>/` —— 电脑和手机的浏览器都能用；
+1. 打开 <https://sne-program.github.io/timetable-app/> —— 电脑和手机的浏览器都能用，电脑上会自动变成桌面布局；
 2. 首次打开有一页说明，读完点「知道了，开始用」；
 3. 想收提醒就允许通知权限，并**把这一页留在前台** —— 关掉标签页就不会响，浏览器就是这么规定的。
 
 **Android 版（要后台提醒与桌面小组件就装它）**
 
-1. 在仓库的 **Releases** 页下载安装包 `timetable-app-vX.Y.Z.apk`（GitHub 会去掉资源名里的中文，所以文件名是英文的，装到手机上叫什么随你），传到手机上（微信 / QQ / 数据线都行）；
+1. 打开下载页 **<https://sne-program.github.io/timetable-app/download/>**（或仓库的 Releases 页）拿到 `timetable-app.apk` —— 这个地址永远指向最新一版，GitHub 会去掉资源名里的中文，所以文件名是英文的，装到手机上叫什么随你；
 2. 点开安装。系统可能提示「未知来源应用」—— 允许一次即可，安装完可以关掉这个开关；
 3. 首次打开有一页隐私说明，读完点「知道了，开始用」；
 4. 建议允许通知权限，否则课前提醒不会响（设置里随时能看到权限的真实状态）。
@@ -116,6 +117,29 @@ TypeScript + React + Vite，Android 由 Capacitor 打包。
 按平台分支的文案集中在 `src/app/meta.ts`、`src/ui/WebReminderPanel.tsx` 与几个面板里，
 判据只有一个 `isNativePlatform()`，不存在「网页版看起来像 Android」的第三种状态。
 
+**电脑上长什么样**
+
+窗口宽度 ≥1024px 且跑在浏览器里时（`src/ui/useWideLayout.ts`），外壳换成桌面版式：
+
+| | 手机 | 电脑 |
+| --- | --- | --- |
+| 导航 | 底部标签栏 | 左侧导航栏（含品牌块、版本号、下载入口）|
+| 课表 | 行高 68px | 行高 92px、节次轴 58px，横向铺满 |
+| 设置 / 外观 | 单列 | 按 `column-width: 380px` 自动分列 |
+| 弹层 | 底部抽屉 | 屏幕正中的对话框（说明书 960px 宽）|
+| 操作 | 触控 | 另有悬停反馈、可见焦点框；← → 翻周、1–5 切页、/ 搜索 |
+
+**刻意不用纯媒体查询**：Android 壳里的平板横屏同样会超过 1024px，那种情况要保留手机版式，
+所以判断条件里带了「不是原生壳」，见 `useWideLayout()`。手机端一行样式都没改。
+
+## 下载页
+
+地址：**<https://sne-program.github.io/timetable-app/download/>** —— 由 `public/download/index.html` 直接提供，
+是一个不经过 React 的静态页（打开就能看到安装包按钮，不用等应用加载），内容有安装步骤、当前版本、SHA-256 与网页版入口。
+
+按钮指向 `releases/latest/download/timetable-app.apk` —— **发版时要同时上传这个固定名字的附件**，它才永远是最新版；
+版本化的 `timetable-app-vX.Y.Z.apk` 用来留档。
+
 ## 开发
 
 ```
@@ -123,7 +147,7 @@ npm install
 npm run dev            # 开发服务器
 npm test               # 单元测试（455 个用例）
 npm run build          # 产出静态文件到 dist/（网页版与 Android 共用）
-npm run preview        # 本地预览 dist/（:4173）
+npm run preview        # 本地预览 dist/（:4173；下载页在 /download/）
 npm run sync:android   # 构建前端并同步到 android/
 npm run open:android   # 用 Android Studio 打开
 npm run apk            # 构建 release APK（需要 ANDROID_HOME / JAVA_HOME）

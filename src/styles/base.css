@@ -129,6 +129,113 @@ input, select { outline: none; }
 /* 图标是内联 SVG，颜色跟随标签前景色（选中时自动变成主题色） */
 .tab-icon { display: block; }
 
+/* ============================================================
+   电脑（宽屏）布局
+   ------------------------------------------------------------
+   只在浏览器里、且窗口 ≥1024px 时由 JS 挂上 .app.wide（见 ui/useWideLayout.ts）：
+   Android 壳里的平板横屏同样会超过 1024px，那种情况要保留手机那套底部标签栏，
+   所以这一整块刻意不写成纯媒体查询 —— 媒体查询分不出"是电脑还是安卓平板"。
+
+   手机样式一行都没改：下面每条规则都带 .app.wide 前缀。
+   ============================================================ */
+
+/* 品牌块与下载入口默认不显示；它们在电脑的侧边栏里才出现 */
+.tab-brand, .tab-foot { display: none; }
+
+.app.wide {
+  /* 桌面不套手机壳：满屏铺开 */
+  max-width: none;
+  margin: 0;
+  box-shadow: none;
+  /* 宽屏把横向空间给课表：节次轴与行高都放大一档 */
+  --row-h: 92px;
+  --axis-w: 58px;
+  --pad: 22px;
+  --tab-h: 0px;
+}
+
+/* 外壳从"上顶栏 + 内容 + 下标签栏"变成"左导航 + 右内容" */
+.app.wide .app-layer {
+  display: grid;
+  grid-template-columns: 236px minmax(0, 1fr);
+  grid-template-rows: 100%;
+}
+.app.wide .content { grid-column: 2; grid-row: 1; min-width: 0; }
+
+.app.wide .tabbar {
+  grid-column: 1; grid-row: 1;
+  position: relative; left: auto; right: auto; bottom: auto;
+  height: auto;
+  display: flex; flex-direction: column; align-items: stretch; gap: 3px;
+  padding: calc(var(--sat) + 14px) 12px calc(var(--sab) + 14px);
+  border-top: 0;
+  border-right: 1px solid var(--c-border);
+}
+
+.app.wide .tab-brand { display: flex; align-items: center; gap: 10px; padding: 0 6px 16px; }
+.tab-brand-mark {
+  width: 34px; height: 34px; flex: 0 0 auto; border-radius: 8px;
+  background: var(--c-accent); color: var(--c-on-accent);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 17px; font-weight: 700;
+}
+.tab-brand-name { font-size: var(--fs-md); font-weight: 700; letter-spacing: -.2px; }
+.tab-brand-sub { font-size: var(--fs-xs); color: var(--c-text-muted); margin-top: 1px; }
+
+.app.wide .tab {
+  flex-direction: row; align-items: center; justify-content: flex-start; gap: 10px;
+  height: 42px; min-height: 42px; padding: 0 12px;
+  border-radius: 8px;
+  font-size: var(--fs-md);
+}
+.app.wide .tab:hover { background: var(--c-surface-2); color: var(--c-text); }
+.app.wide .tab.active {
+  background: color-mix(in srgb, var(--c-accent) 12%, transparent);
+  color: var(--c-accent);
+}
+/* 手机上那条顶部指示条，在侧边栏里改成左侧竖条 */
+.app.wide .tab.active::before {
+  top: 50%; left: 0; transform: translateY(-50%);
+  width: 3px; height: 18px; border-radius: 2px;
+}
+.app.wide .tab-icon { width: 18px; height: 18px; }
+
+.app.wide .tab-foot {
+  display: block; margin-top: auto; padding: 12px 6px 0;
+  border-top: 1px solid var(--c-border);
+}
+.app.wide .tab-get {
+  display: flex; align-items: center; justify-content: center;
+  height: var(--h-md); border-radius: 8px; text-decoration: none;
+  border: 1px solid color-mix(in srgb, var(--c-accent) 45%, transparent);
+  color: var(--c-accent); font-size: var(--fs-sm); font-weight: 600;
+}
+.app.wide .tab-get:hover { background: color-mix(in srgb, var(--c-accent) 10%, transparent); }
+.app.wide .tab-ver {
+  margin-top: 8px; text-align: center;
+  font-size: var(--fs-xs); color: var(--c-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 内容区：底部不再给标签栏留位置 */
+.app.wide .content-inner { padding-bottom: 44px; }
+.app.wide .topbar { padding-top: 16px; padding-bottom: 2px; }
+.app.wide .week-strip { scrollbar-width: thin; }
+
+/* 悬浮按钮挪到内容区右下角，别压住侧边栏 */
+.app.wide .fab { right: 30px; bottom: 30px; }
+
+/* 鼠标环境下的悬停反馈：手机上没有 hover，所以只在宽屏加 */
+.app.wide .btn:hover { border-color: var(--c-border-strong); }
+.app.wide .btn.primary:hover { filter: brightness(1.07); }
+.app.wide .icon-btn:hover { background: var(--c-surface-2); }
+.app.wide .list-row.tap:hover { background: var(--c-surface-2); }
+.app.wide .chip:hover { border-color: var(--c-border-strong); }
+.app.wide .ev:hover { border-color: var(--c-accent); }
+
+/* 键盘焦点要看得见 —— 桌面用户会用 Tab 键走路 */
+.app.wide :focus-visible { outline: 2px solid var(--c-accent); outline-offset: 2px; }
+
 /* ---------- 工具类 ---------- */
 .row { display: flex; align-items: center; gap: 8px; }
 .col { display: flex; flex-direction: column; }

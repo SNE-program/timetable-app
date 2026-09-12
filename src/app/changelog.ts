@@ -46,6 +46,17 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 
 export const CHANGELOG: ChangeEntry[] = [
   {
+    version: '1.5.0',
+    date: '',
+    title: '电脑上也能好好用了 · 下载页',
+    items: [
+      { kind: 'new', text: '**电脑布局**：在电脑浏览器里打开时，标签栏变成左侧的导航栏，课表横向铺开（每节课能多显示一行字），设置页排成两列，弹层变成屏幕正中的对话框。窗口拉宽拉窄会实时切换，不用刷新。' },
+      { kind: 'new', text: '**键盘快捷键**：电脑上可以直接用 ← → 翻周、数字 1–5 切换页面、按 / 搜索，撤销重做还是 Ctrl+Z / Ctrl+Y。' },
+      { kind: 'new', text: '**多了一个下载页**：网页版里所有「获取 Android 版」都通向同一个下载页，上面写着安装步骤、当前版本与校验值，下载按钮永远指向最新一版。' },
+      { kind: 'note', text: '手机上的样子和操作与上一版**完全一致**：这一版只增加了电脑上的适配，手机端一行样式都没改。' },
+    ],
+  },
+  {
     version: '1.4.0',
     date: '',
     title: '多了一个网页版',

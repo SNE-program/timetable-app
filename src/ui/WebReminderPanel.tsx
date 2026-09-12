@@ -1,6 +1,6 @@
 import React from 'react';
 import { Panel } from './common';
-import { ANDROID_RELEASE_URL } from '../app/meta';
+import { DOWNLOAD_PAGE } from '../app/meta';
 
 /**
  * 网页版的提醒边界（只在网页版渲染）。
@@ -57,11 +57,9 @@ export default function WebReminderPanel() {
             两边的数据互通，导出 JSON 在手机上导入即可。
           </div>
         </div>
-        {ANDROID_RELEASE_URL ? (
-          <div className="lr-right">
-            <a className="btn sm primary" href={ANDROID_RELEASE_URL} target="_blank" rel="noreferrer noopener">获取</a>
-          </div>
-        ) : null}
+        <div className="lr-right">
+          <a className="btn sm primary" href={DOWNLOAD_PAGE}>获取</a>
+        </div>
       </div>
     </Panel>
   );
