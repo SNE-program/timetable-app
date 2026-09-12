@@ -27,6 +27,10 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # 「附加到 Release」要写权限。仓库默认权限是只读时，那一步会失败 —— 实测踩到过
+    # （前面所有步骤都成功，只在最后一步 403）。
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -90,15 +94,28 @@ jobs:
           BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           "$BT/apksigner" verify --print-certs "$APK"
 
+      # 名字要和手工发布时一致：
+      #   timetable-app-vX.Y.Z.apk  版本化留档
+      #   timetable-app.apk         固定名字；下载页的按钮指向 releases/latest/download/timetable-app.apk
+      # 两个文件内容相同，只是名字不同。
+      - name: 规范化安装包名字
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          mkdir -p release-assets
+          cp android/app/build/outputs/apk/release/app-release.apk "release-assets/timetable-app-v${VERSION}.apk"
+          cp android/app/build/outputs/apk/release/app-release.apk "release-assets/timetable-app.apk"
+          sha256sum release-assets/*.apk
+          ls -l release-assets
+
       - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
           name: timetable-apk
-          path: android/app/build/outputs/apk/release/app-release.apk
+          path: release-assets/*.apk
 
       - name: 附加到 Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: android/app/build/outputs/apk/release/app-release.apk
+          files: release-assets/*.apk
           generate_release_notes: true

@@ -42,7 +42,21 @@
 | 改密码 | 填两次新密码 → 保存 → 面板关闭、提示「密码已更新」|
 | 复核 | 用**新密码**调登录接口 → 成功（旧密码不再可用）|
 
-**④ 交付**
+**④ 顺带把 CI 出包这条路也修了**
+
+每次打 tag，`Android APK` 工作流都会红一次。这次查清了，是两件事：
+
+1. **缺签名密钥**：把 `KEYSTORE_BASE64` / `KEYSTORE_PASSWORD` / `KEY_ALIAS` / `KEY_PASSWORD` 四个 secret 配上了，
+   现在 CI 能自己打出与手工包**同一张证书**的签名包（步骤 10–13 全绿）；
+2. **缺写权限**：「附加到 Release」那一步需要 `contents: write`，仓库默认只读时会 403 —— 已在 `android.yml` 里显式声明。
+
+顺手把 CI 产物的名字改成和手工发布一致（`timetable-app-vX.Y.Z.apk` 与固定名 `timetable-app.apk`），
+这样下载页那个固定地址（`releases/latest/download/timetable-app.apk`）由谁发版都成立。
+
+记一个坑：给仓库写 secret 要用 libsodium 的 **sealed box**（`epk(32) || MAC(16) || 密文`，nonce 是全零且不写进密文）。
+用 tweetnacl 手搓的那版被 GitHub 以 `422 improperly encrypted secret` 拒了两次，换成 `libsodium-wrappers` 一次通过。
+
+**⑤ 交付**
 
 | 项目 | 结果 |
 | --- | --- |
