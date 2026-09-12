@@ -1,7 +1,7 @@
 import React from 'react';
 import { Icon } from './icons';
 import { describeSize } from '../cloud/backup';
-import { isMine } from '../cloud/mascots';
+import { MAX_MASCOT_BYTES, formatMb, isMine, prepareMascotUpload } from '../cloud/mascots';
 import {
   cloudDeleteMascot, cloudLoadMascots, cloudQuotaLine, cloudSetMascotPublic, cloudUploadMascot, cloudUseMascot, useApp,
 } from '../app/store';
@@ -34,19 +34,29 @@ export default function MascotCloudSection() {
   const others = c.mascots.filter(function (m) { return m.is_public && !isMine(m, me); });
   const localPack = s.mascot;
 
+  /*
+   * 本机这个角色包上传后大概多大 —— 提前算出来给用户看。
+   * 等到点了上传才报"超过 8 MB"，等于让人白等一次；而且尺寸这种事
+   * 事先说清楚，用户才知道该不该先压一下素材。
+   */
+  const localSize = React.useMemo(function () {
+    if (!localPack) return null;
+    try { return prepareMascotUpload(localPack); } catch (e) { return null; }
+  }, [localPack]);
+  const tooBig = !!localSize && localSize.bytes > MAX_MASCOT_BYTES;
+
   return (
     <div>
-      <div className="list-row">
-        <div className={'dot ' + (c.quota && c.quota.unlimited ? 'ok' : 'warn')} />
-        <div>
-          <div className="lr-label">云端角色</div>
-          <div className="lr-sub">{c.session ? (cloudQuotaLine() || '正在读取配额…') : '未登录：可以看公开角色，登录后才能上传自己的'}</div>
-        </div>
-        <div className="lr-right">
-          <button className="btn sm" disabled={busy} onClick={function () { void cloudLoadMascots(); }}>
-            {busy ? '…' : '刷新'}
-          </button>
-        </div>
+      {/* 配额那一行并进列表标题里 —— 上面已经有「云端角色」这个小标题了，
+          再写一遍就是同一句话出现两次 */}
+      <div className="panel-desc" style={{ paddingTop: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
+        <b>我的角色（{mine.length}）</b>
+        <span style={{ flex: '1 1 auto' }}>
+          {c.session ? (cloudQuotaLine() || '正在读取…') : '未登录：公开角色照样能用，登录后才能传自己的'}
+        </span>
+        <button className="btn sm" disabled={busy} onClick={function () { void cloudLoadMascots(); }}>
+          {busy ? '…' : '刷新'}
+        </button>
       </div>
 
       {/* 上传 */}
@@ -54,9 +64,13 @@ export default function MascotCloudSection() {
         <div>
           <div className="lr-label">把当前角色传到云端</div>
           <div className="lr-sub">
-            {localPack
-              ? '当前：' + localPack.name + '（含素材一起传，换设备直接就能用）'
-              : '本机还没有角色：先到 外观 → 角色 里做一个或导入一个'}
+            {!localPack
+              ? '本机还没有角色：先到 外观 → 角色 里做一个或导入一个'
+              : tooBig
+                ? '当前：' + localPack.name + ' · ' + formatMb(localSize!.bytes) + ' —— 超过 ' + formatMb(MAX_MASCOT_BYTES) + ' 上限，先把素材压小一点'
+                : '当前：' + localPack.name
+                  + (localSize ? ' · ' + formatMb(localSize.bytes) : '')
+                  + '（含素材一起传，换设备直接就能用；单个上限 ' + formatMb(MAX_MASCOT_BYTES) + '）'}
           </div>
         </div>
       </div>
@@ -67,7 +81,7 @@ export default function MascotCloudSection() {
           value={name} onChange={function (e) { setName(e.target.value); }}
         />
         <button
-          className="btn sm primary" disabled={busy || !localPack || !c.session}
+          className="btn sm primary" disabled={busy || !localPack || !c.session || tooBig}
           onClick={function () { void cloudUploadMascot(name || (localPack ? localPack.name : ''), pub); }}
         >{busy ? '上传中…' : '上传'}</button>
       </div>
@@ -83,8 +97,6 @@ export default function MascotCloudSection() {
         <div className="panel-desc" style={{ color: 'var(--c-danger)' }}>{c.mascotsError}</div>
       ) : null}
 
-      {/* 我的角色 */}
-      <div className="panel-desc" style={{ paddingTop: 8, fontWeight: 700 }}>我的角色（{mine.length}）</div>
       {mine.length === 0 ? (
         <div className="panel-desc">{c.session ? '云端还没有你的角色。' : '登录之后就能把自己做的角色存到这里。'}</div>
       ) : mine.map(function (m) {
@@ -116,7 +128,7 @@ export default function MascotCloudSection() {
           <div className="list-row" key={m.id}>
             <div>
               <div className="lr-label">{m.name}</div>
-              <div className="lr-sub">{describeSize(m.size_bytes)}</div>
+              <div className="lr-sub">别人公开的 · {describeSize(m.size_bytes)}</div>
             </div>
             <div className="lr-right">
               <button className="btn sm primary" disabled={busy} onClick={function () { void cloudUseMascot(m); }}>使用</button>
@@ -126,7 +138,7 @@ export default function MascotCloudSection() {
       })}
 
       <div className="panel-desc" style={{ paddingTop: 8 }}>
-        角色包只包含图片素材与动作参数，**不会执行任何代码**；用别人的角色等于把那份素材存到本机。
+        角色包只包含图片素材与动作参数，<b>不会执行任何代码</b>；用别人的角色等于把那份素材存到本机。
         别人公开的角色，只有你点「使用」时才会下载。
       </div>
     </div>

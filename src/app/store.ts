@@ -1468,7 +1468,9 @@ export interface CloudState {
 function initialCloud(): CloudState {
   const base: CloudState = {
     session: loadSession(), busy: '', error: '', notice: '', backup: null, passwordSheet: false, linkType: '',
-    sheet: false, mascots: [], mascotsLoaded: false, mascotsBusy: false, mascotsError: '', quota: null,
+    /* ?open=cloud：开发与无头检查用，直接把云弹层打开 */
+    sheet: openParam() === 'cloud',
+    mascots: [], mascotsLoaded: false, mascotsBusy: false, mascotsError: '', quota: null,
   };
   let link = null;
   try { link = parseAuthLink(window.location.hash, window.location.search); } catch (e) { link = null; }
@@ -1871,6 +1873,19 @@ export async function cloudUploadMascot(name: string, isPublic: boolean): Promis
 /** 用云端的某个角色替换本机当前角色（含素材） */
 export async function cloudUseMascot(m: CloudMascot): Promise<void> {
   if (!cloudConfigured()) return;
+  /*
+   * 本机已经有角色时先问一句。
+   * 「使用」是不可撤销的替换（旧角色连同它的素材一起被换掉），
+   * 在列表里点一下就发生这种事，用户很容易点错 —— 而这类误触正是这个项目一直在防的。
+   */
+  if (state.mascot) {
+    const ok = await confirmDanger(
+      '用「' + m.name + '」替换现在的角色「' + state.mascot.name + '」？'
+      + '替换之后本机原来那个就没了 —— 除非你把它传过云端或导出过角色包。',
+      '替换'
+    );
+    if (!ok) return;
+  }
   setCloud({ mascotsBusy: true, mascotsError: '' });
   try {
     let token: string | null = null;

@@ -22,8 +22,17 @@ import type { MascotPack } from '../mascot/types';
  */
 
 export const MASCOTS_BUCKET = 'mascots';
-/** Storage 单文件上限之内，但对"一个角色"来说 4 MB 已经很宽了；超了先提醒而不是硬传 */
-export const MAX_MASCOT_BYTES = 4 * 1024 * 1024;
+
+/**
+ * 单个角色包的上限：8 MB。
+ *
+ * 为什么不是"不限"：素材是 base64 塞在 JSON 里的（比原图大 1/3），
+ * 8 MB 的包已经相当于 6 MB 图片 —— 一个手做的角色通常几十到几百 KB，做视频抽帧的也就 1–3 MB。
+ * 而 Storage 的额度是整个项目**共用**的（免费版 1 GB 存储、每月 5 GB 流量）：
+ * 放开单个文件的大小，等于允许一个人把共用额度占满，之后**所有人**都传不上来。
+ * 所以这里按"够用 + 不伤人"取 8 MB；Storage 那个桶也设了同样的限制，两边一致。
+ */
+export const MAX_MASCOT_BYTES = 8 * 1024 * 1024;
 
 export interface CloudMascot {
   id: string;
@@ -99,7 +108,11 @@ export async function uploadMascot(
     throw new CloudError('这个角色的素材在本机缺了一部分（多半是上次导入没存全），先重新导入一次再传', 0, 'missing_assets');
   }
   if (prepared.bytes > MAX_MASCOT_BYTES) {
-    throw new CloudError('这个角色包 ' + Math.round(prepared.bytes / 1024 / 1024 * 10) / 10 + ' MB，超过 4 MB 上限：把素材压小一点再传', 0, 'too_large');
+    throw new CloudError(
+      '这个角色包 ' + formatMb(prepared.bytes) + '，超过 ' + formatMb(MAX_MASCOT_BYTES) + ' 上限。'
+      + '把素材压小一点再传：图片长边压到 1024 以内、视频抽帧别超过 24 帧，通常能降到 1 MB 以下',
+      0, 'too_large'
+    );
   }
   const id = newId();
   const path = userId + '/' + id + '.json';
@@ -108,7 +121,8 @@ export async function uploadMascot(
     rawBody: prepared.text,
     contentType: 'application/json',
     headers: { 'x-upsert': 'false' },
-    timeoutMs: 60000,
+    /* 8 MB 在手机流量上传可能要一分多钟，超时要给足 */
+    timeoutMs: 180000,
   });
   try {
     const json = await cloudRequest('POST', '/rest/v1/mascots', {
@@ -133,7 +147,7 @@ export async function uploadMascot(
 export async function fetchMascot(token: string | null, path: string): Promise<ValidateMascotResult> {
   const json = await cloudRequest('GET', '/storage/v1/object/' + MASCOTS_BUCKET + '/' + encodeURIComponent(path).replace(/%2F/g, '/'), {
     token: token || undefined,
-    timeoutMs: 60000,
+    timeoutMs: 180000,
   });
   const text = typeof json === 'string' ? json : JSON.stringify(json);
   return parseMascotFileText(text);
@@ -152,6 +166,11 @@ export async function deleteMascot(token: string, m: CloudMascot): Promise<void>
   try {
     await cloudRequest('DELETE', '/storage/v1/object/' + MASCOTS_BUCKET + '/' + encodeURIComponent(m.path).replace(/%2F/g, '/'), { token: token });
   } catch (e) { /* 对象没删掉不影响"这个角色已经不在列表里" */ }
+}
+
+/** 把字节数说成 MB（界面直接用） */
+export function formatMb(bytes: number): string {
+  return (Math.round(bytes / 1024 / 1024 * 10) / 10) + ' MB';
 }
 
 /** 配额提示文案（界面直接用） */

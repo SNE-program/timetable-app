@@ -6,7 +6,7 @@ import { extractAssets } from '../storage/assetRef';
 import { defaultTheme } from '../theme/tokens';
 import { buildDemoData } from '../core/demo';
 import { __setCloudConfigForTest } from './config';
-import { MAX_MASCOT_BYTES, isMine, prepareMascotUpload, quotaLine, uploadMascot, fetchMascot } from './mascots';
+import { MAX_MASCOT_BYTES, formatMb, isMine, prepareMascotUpload, quotaLine, uploadMascot, fetchMascot } from './mascots';
 
 /**
  * 云端角色：**一个真实网络请求都不发**（fetch 全被换掉）。
@@ -158,8 +158,23 @@ describe('上传的两步与失败清理', function () {
     const calls = stub(function () { return { json: {} }; });
     let err = '';
     try { await uploadMascot('t', 'u1', huge, 'x', false); } catch (e) { err = (e as Error).message; }
-    expect(err).toContain('4 MB');
+    expect(err).toContain('8 MB');
+    /* 报错要把"怎么办"说清楚，而不是只说超了 */
+    expect(err).toContain('压小');
     expect(calls.length).toBe(0);
+  });
+
+  it('上限是 8 MB，且刚好卡在边界上（多 1 KB 也不放行）', async function () {
+    expect(MAX_MASCOT_BYTES).toBe(8 * 1024 * 1024);
+    expect(formatMb(MAX_MASCOT_BYTES)).toBe('8 MB');
+    expect(formatMb(1024 * 1024 * 1.24)).toBe('1.2 MB');
+
+    /* 造一个刚好 8 MB 出头的包：base64 里的每个字符算 1 字节 */
+    const over = pack(false);
+    const body = 'data:image/gif;base64,' + 'z'.repeat(MAX_MASCOT_BYTES);
+    over.states.react = { kind: 'animated', src: body };
+    const out = prepareMascotUpload(over);
+    expect(out.bytes).toBeGreaterThan(MAX_MASCOT_BYTES);
   });
 });
 

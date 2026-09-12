@@ -17,7 +17,7 @@ const POINTS: { icon: IconName; title: string; sub: string }[] = [
   {
     icon: 'lock',
     title: '数据只在这台设备上',
-    sub: '课表、任务、出勤记录都存在本机，不上传、不联网、不需要注册账号。',
+    sub: '课表、任务、出勤记录都存在本机，不注册也能用，也不会传到任何服务器 —— 除非你自己开启云备份。',
   },
   {
     icon: 'ban',

@@ -36,8 +36,8 @@ export default function CloudPanel() {
     <Panel
       title="云备份"
       sub={sub}
-      desc={'可选功能，默认关闭。只有你在下面按按钮时才会联网，备份发到你自己项目的服务器（'
-        + cloudServerHost() + '）；不登录的话，这个应用与以前一样完全离线。'}
+      desc={'可选功能，默认关闭。只有你在下面按按钮时才会联网；备份存在项目自己的服务器上（'
+        + cloudServerHost() + '），不经过任何第三方。不登录的话，这个应用与以前一样完全离线。'}
     >
       {c.session ? (
         <React.Fragment>

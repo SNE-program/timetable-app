@@ -1,8 +1,8 @@
 import React from 'react';
 import {
-  importMascotImage, importMascotPack, importMascotSheet, mascotExportText, openManual, openMascotEditor,
-  confirmDanger, patchMascotPrefs, patchPrefs, removeMascot, repairMascotFrames, resetMascotPosition,
-  showToast, useApp,
+  closeSheets, confirmDanger, importMascotImage, importMascotPack, importMascotSheet, mascotExportText,
+  openCloudSheet, openManual, openMascotEditor, patchMascotPrefs, patchPrefs, removeMascot, repairMascotFrames,
+  resetMascotPosition, showToast, useApp,
 } from '../app/store';
 import { prepareMascotImage } from '../theme/image';
 import { describeVideoSheet, isVideoFile, videoToSpriteSheet } from '../theme/videoSheet';
@@ -13,6 +13,7 @@ import { saveTextFile } from '../platform/saveFile';
 import { Panel, Sheet, SliderRow, SwitchRow } from './common';
 import MascotArt from './MascotArt';
 import MascotThumb from './MascotThumb';
+import { cloudConfigured } from '../cloud/config';
 
 
 /**
@@ -345,6 +346,20 @@ export default function MascotPanel() {
               <div>
                 <div className="lr-label">导出角色包</div>
                 <div className="lr-sub">拿到一个内嵌素材的 .json，可以发给别人</div>
+              </div>
+              <div className="lr-right">›</div>
+            </div>
+          ) : null}
+          {/*
+            云端角色的入口也放一条在这里。
+            右上角那个云图标是"全局入口"，但用户是在**这一页**做角色的 ——
+            做完想存起来的时候，入口应该在手边，而不是让他自己想起右上角。
+          */}
+          {cloudConfigured() ? (
+            <div className="list-row tap" style={{ cursor: 'pointer' }} onClick={function () { closeSheets(); openCloudSheet(); }}>
+              <div>
+                <div className="lr-label">云端角色</div>
+                <div className="lr-sub">把角色存到云端（换设备直接用），也可以公开给同学、或使用别人公开的角色</div>
               </div>
               <div className="lr-right">›</div>
             </div>
