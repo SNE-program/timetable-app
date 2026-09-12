@@ -46,7 +46,7 @@ import {
 } from '../cloud/mascots';
 import { loadSession, saveSession, freshToken } from '../cloud/session';
 import { cloudConfigured, cloudHost } from '../cloud/config';
-import { checkForUpdate, updateSummary, type CheckResult } from './update';
+import { checkForUpdate, downloadUrls, updateSummary, type CheckResult } from './update';
 import { syncPromptFor } from '../cloud/syncAsk';
 import { updateManifestUrls } from './meta';
 import { canInstallApk, downloadAndInstallApk, openInstallSettings } from '../platform/appUpdate';
@@ -2114,8 +2114,8 @@ export function updateLine(): string {
 export async function installUpdate(): Promise<void> {
   const info = state.update.result;
   if (!info || info.kind !== 'newer') return;
-  const url = info.info.apkUrl || '';
-  if (!url) {
+  const urls = downloadUrls(info.info);
+  if (!urls.length) {
     setUpdate({ error: '这个版本没有拿到安装包地址（多半是开发构建），请到项目主页的 Releases 里下载' });
     return;
   }
@@ -2132,7 +2132,7 @@ export async function installUpdate(): Promise<void> {
     return;
   }
   setUpdate({ progress: 0, error: '' });
-  const r = await downloadAndInstallApk(url, 'timetable-app-' + info.info.version + '.apk', function (p) {
+  const r = await downloadAndInstallApk(urls, 'timetable-app-' + info.info.version + '.apk', function (p) {
     setUpdate({ progress: p });
   });
   if (!r.ok) {

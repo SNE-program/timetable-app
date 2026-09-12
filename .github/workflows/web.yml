@@ -41,6 +41,8 @@ jobs:
           # anon key 是公开的；service_role key 不许进这里，也不许进前端。
           VITE_SUPABASE_URL: ${{ vars.SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+          # latest.json 里的主下载地址要用它拼（应用内更新的默认来源）
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

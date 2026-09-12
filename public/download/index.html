@@ -92,7 +92,12 @@
   </p>
 
   <div class="card">
-    <a class="btn" href="https://github.com/SNE-program/timetable-app/releases/latest/download/timetable-app.apk">
+    <!--
+      主下载地址走项目自己的存储（Cloudflare），而不是 GitHub Releases：
+      国内校园网里 github.com 与 *.githubusercontent.com 经常连不上，点了就是"无法连接"。
+      Releases 那条降级成"所有版本"入口。
+    -->
+    <a class="btn" href="https://oglzpevmqpcmryznqaiu.supabase.co/storage/v1/object/public/app/timetable-app.apk">
       下载 Android 安装包（APK）
     </a>
     <a class="btn secondary" href="https://github.com/SNE-program/timetable-app/releases/latest">
@@ -122,9 +127,9 @@
 
   <div class="card">
     <h2>当前版本</h2>
-    <div class="kv"><b>版本</b><span>v1.8.1（versionCode 58）</span></div>
-    <div class="kv"><b>文件大小</b><span>9.23 MB（9,678,259 字节）</span></div>
-    <div class="kv"><b>SHA-256</b><span class="mono">D0C563D39EE23C722ADC5A2FC8BF26F06E2718B5E59AABD1E44C5F9B0550F371</span></div>
+    <div class="kv"><b>版本</b><span>v1.8.2（versionCode 59）</span></div>
+    <div class="kv"><b>文件大小</b><span>9.23 MB（9,678,959 字节）</span></div>
+    <div class="kv"><b>SHA-256</b><span class="mono">A9CF86547591FF42EC9507FAFA661F405392F4F66E16A07DC7302BBB68242FE8</span></div>
     <div class="kv"><b>兼容</b><span>Android 8.0 及以上（arm64 / armeabi-v7a）</span></div>
     <div class="note">
       校验方法：在电脑上运行 <code>certutil -hashfile 文件名 SHA256</code>（Windows）或

@@ -107,9 +107,30 @@ public class UpdatePlugin extends Plugin {
      */
     @PluginMethod
     public void downloadAndInstall(final PluginCall call) {
-        final String url = call.getString("url");
+        /*
+         * 地址可以给多个：主地址连不上时依次试下一个。
+         * 这是踩出来的 —— 第一版只给 GitHub Releases 的地址，而 github.com 与
+         * *.githubusercontent.com 在国内校园网里经常直接连不上，用户看到的就是
+         * "failed to connect"。现在主地址是应用自己的 Storage（Cloudflare），GitHub 作备选。
+         */
+        final java.util.List<String> urls = new java.util.ArrayList<>();
+        com.getcapacitor.JSArray arr = call.getArray("urls");
+        if (arr != null) {
+            try {
+                for (Object o : arr.toList()) {
+                    if (o != null) {
+                        String s = String.valueOf(o);
+                        if (!s.isEmpty()) urls.add(s);
+                    }
+                }
+            } catch (Exception e) {
+                // 解析失败就走下面单地址分支
+            }
+        }
+        String single = call.getString("url");
+        if (urls.isEmpty() && single != null && !single.isEmpty()) urls.add(single);
         final String fileName = call.getString("fileName", "update.apk");
-        if (url == null || url.isEmpty()) {
+        if (urls.isEmpty()) {
             call.reject("没有下载地址");
             return;
         }
@@ -125,17 +146,36 @@ public class UpdatePlugin extends Plugin {
                 }
                 File out = new File(dir, fileName);
                 HttpURLConnection conn = null;
-                try {
-                    conn = (HttpURLConnection) new URL(url).openConnection();
-                    conn.setInstanceFollowRedirects(true);
-                    conn.setConnectTimeout(15000);
-                    conn.setReadTimeout(60000);
-                    conn.connect();
-                    int code = conn.getResponseCode();
-                    if (code < 200 || code >= 300) {
-                        call.reject("下载失败：服务器返回 " + code);
-                        return;
+                String lastError = "";
+                boolean connected = false;
+                for (String url : urls) {
+                    if (connected) break;
+                    try {
+                        conn = (HttpURLConnection) new URL(url).openConnection();
+                        conn.setInstanceFollowRedirects(true);
+                        conn.setConnectTimeout(15000);
+                        conn.setReadTimeout(60000);
+                        conn.connect();
+                        int code = conn.getResponseCode();
+                        if (code < 200 || code >= 300) {
+                            lastError = "服务器返回 " + code;
+                            conn.disconnect();
+                            conn = null;
+                            continue;
+                        }
+                        connected = true;
+                    } catch (Exception e) {
+                        lastError = e.getMessage() == null ? e.toString() : e.getMessage();
+                        if (conn != null) conn.disconnect();
+                        conn = null;
                     }
+                }
+                if (!connected || conn == null) {
+                    call.reject("每个下载地址都连不上（最后一条：" + lastError + "）。"
+                            + "换个网络再试，或到项目主页的 Releases 手动下载安装包");
+                    return;
+                }
+                try {
                     int total = conn.getContentLength();
                     InputStream in = conn.getInputStream();
                     FileOutputStream fos = new FileOutputStream(out);

@@ -113,6 +113,27 @@ jobs:
           name: timetable-apk
           path: release-assets/*.apk
 
+      # 应用内更新默认从项目自己的存储下载（GitHub 的下载域名在国内校园网里经常连不上）。
+      # 没有配 secret 时这一步只是跳过，不会让整个打包失败。
+      - name: 同步到应用内更新的下载地址
+        env:
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_KEY" ]; then
+            echo "没配 SUPABASE_URL / SUPABASE_SERVICE_KEY，跳过（应用内更新会退回 GitHub 地址）"
+            exit 0
+          fi
+          for f in release-assets/*.apk; do
+            echo "上传 $(basename "$f")"
+            curl -fsS -X POST \
+              "$SUPABASE_URL/storage/v1/object/app/$(basename "$f")" \
+              -H "Authorization: Bearer $SUPABASE_SERVICE_KEY" \
+              -H "Content-Type: application/vnd.android.package-archive" \
+              -H "x-upsert: true" \
+              --data-binary "@$f" || echo "上传失败：$(basename "$f")（不影响 Release）"
+          done
+
       - name: 附加到 Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2

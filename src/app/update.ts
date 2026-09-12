@@ -17,9 +17,27 @@
 
 export interface LatestManifest {
   version: string;
+  /** 主下载地址（Supabase Storage 的公开桶：国内网络里通） */
   apkUrl?: string;
+  /** 备选下载地址（GitHub Releases：主地址连不上时再试） */
+  apkAlt?: string;
   pageUrl?: string;
   publishedAt?: string;
+}
+
+/**
+ * 按顺序尝试的下载地址。
+ *
+ * 为什么要两个：GitHub 的下载域名在国内校园网里经常连不上，
+ * 而应用自己的 Storage 域名是通的（云备份能登录就说明这一点）。
+ * 插件会依次试，第一个能连上的就用。
+ */
+export function downloadUrls(info: LatestManifest): string[] {
+  const list: string[] = [];
+  for (const u of [info.apkUrl, info.apkAlt]) {
+    if (u && list.indexOf(u) < 0) list.push(u);
+  }
+  return list;
 }
 
 export type CheckResult =
@@ -54,6 +72,7 @@ function sanitize(raw: unknown): LatestManifest | null {
   return {
     version: version,
     apkUrl: typeof o.apkUrl === 'string' ? o.apkUrl : '',
+    apkAlt: typeof o.apkAlt === 'string' ? o.apkAlt : '',
     pageUrl: typeof o.pageUrl === 'string' ? o.pageUrl : '',
     publishedAt: typeof o.publishedAt === 'string' ? o.publishedAt : '',
   };

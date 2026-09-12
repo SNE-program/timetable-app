@@ -8,6 +8,59 @@
 
 ---
 
+## v1.8.2
+
+修好「下载失败」：安装包改从能连上的地方取
+
+**① 现象与根因**
+
+应用内更新点「下载并安装」→ `failed to connect`。
+原因是第一版把安装包地址指向了 GitHub Releases：`github.com` 与 `*.githubusercontent.com` 在校园网 / 国内网络里经常直接连不上。
+证据就在本机日志里：同一台机器上 `github.com:443` 时而能连、时而 `Could not connect`，
+而 `timble.bond` 与 `*.supabase.co` 一直是通的（能登录云备份就说明后者通）。
+
+**② 改法：主地址换成自己的存储，GitHub 降级成备选，两个都试**
+
+| | 之前 | 现在 |
+| --- | --- | --- |
+| 主下载地址 | GitHub Releases | **Supabase Storage 的公开桶**（`app/timetable-app.apk`，走 Cloudflare）|
+| 备选 | 无 | GitHub Releases（主地址连不上时自动试）|
+| 失败提示 | 原样抛出英文异常 | 「每个下载地址都连不上（最后一条：…）。换个网络再试，或到项目主页的 Releases 手动下载」|
+
+新增一个公开读、**只允许服务端写**的桶（`supabase/schema-app-bucket.sql`）：
+公开读是为了让应用内直接下载、以及浏览器里点下载都能用；不建任何写策略，
+上传只能走 `service_role`（发布流程用它），否则任何人都能往这儿塞东西。
+
+**③ 一个意外的好处：1.8.1 的用户不用重装**
+
+下载地址写在服务器上的 `latest.json` 里，不在安装包里。所以改完清单那一刻，
+已经装了 1.8.1 的人再点「下载并安装」就是从新地址取的 —— 这次修复对他们是**即刻生效**的。
+（装的更早的版本没有这个功能，仍需手动装一次。）
+
+**④ 顺手把发布流程自动化了**
+
+`android.yml` 里加了一步：打完包之后把 APK 同步到 Storage 的那个桶（`x-upsert: true`），
+用仓库 secret `SUPABASE_SERVICE_KEY` 授权；没配这个 secret 时那一步跳过、不影响 Release。
+以后发版不再需要手工补传。网页构建那边也把 `SUPABASE_URL` 传给了 `latest-json.mjs`，主地址才能拼出来。
+
+**⑤ 验证**
+
+| 项 | 结果 |
+| --- | --- |
+| 桶 | `app` 建好，public=true；写入只走 service_role |
+| 上传 | `timetable-app.apk` 与版本化那份都上传成功（9,678,259 字节）|
+| 公开下载（不带任何密钥）| `HTTP 200`、`content-length=9678259`、`content-type=application/vnd.android.package-archive` |
+| 单元测试 | 523 通过 / 30 文件；`tsc --noEmit` 0 错误 |
+
+**⑥ 交付**
+
+| 项目 | 结果 |
+| --- | --- |
+| 版本 | versionCode **59** / versionName **1.8.2** |
+| 新增文件 | `supabase/schema-app-bucket.sql` |
+| Android | `课表助手-v1.8.2.apk` · 9.23 MB · SHA-256 `A9CF86547591FF42EC9507FAFA661F405392F4F66E16A07DC7302BBB68242FE8` · Defender `found no threats` |
+
+---
 ## v1.8.1
 
 登录一次就够了 · 登录后先问一句怎么同步

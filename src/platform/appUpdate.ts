@@ -44,7 +44,7 @@ export async function clearDownloadedApk(): Promise<void> {
  * 监听器用完要摘掉 —— 更新这种低频动作留下的监听会一直挂在浏览器里。
  */
 export async function downloadAndInstallApk(
-  url: string, fileName: string, onProgress?: (percent: number) => void
+  urls: string[], fileName: string, onProgress?: (percent: number) => void
 ): Promise<{ ok: boolean; error?: string }> {
   const cap = typeof window !== 'undefined' ? (window as unknown as { Capacitor?: any }).Capacitor : null;
   const plugin = cap && cap.Plugins ? cap.Plugins.AppUpdate : null;
@@ -58,7 +58,7 @@ export async function downloadAndInstallApk(
     } catch (e) { handle = null; }
   }
   try {
-    await nativeCall('AppUpdate', 'downloadAndInstall', { url: url, fileName: fileName });
+    await nativeCall('AppUpdate', 'downloadAndInstall', { urls: urls, fileName: fileName });
     return { ok: true };
   } catch (e) {
     return { ok: false, error: (e as Error).message || '下载失败' };
