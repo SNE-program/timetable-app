@@ -91,6 +91,7 @@
 | 删除 | `src/ui/WebReminderPanel.tsx`（并入设置页）、网页版的小组件说明、设置页里的整套云面板、顶栏设置齿轮 |
 | 新增 | `src/app/renderCount.ts`、`?perf=` 自检、`Panel collapsible`、说明书章节切换、`?open=manual&doc=` |
 | 主要改动 | `src/ui/SettingsView.tsx`（重写）、`src/ui/ThemeStudio.tsx`、`src/ui/ManualView.tsx`、`src/ui/common.tsx`、`src/ui/Mascot.tsx`、`src/main.tsx`、`src/ui/Welcome.tsx`、`src/ui/CloudSheet.tsx`、`src/ui/CloudPanel.tsx` |
+| Android | `课表助手-v1.9.0.apk` · 9.23 MB（9,682,703 字节）· SHA-256 `22AB41ED53CDC8FD1BFDE64E0CFCD7578A17F6D5DF0EE011F7FE9D0CAD5ED7AD` · 由 tag `v1.9.0` 触发的 CI 构建 · 与前几版同一张证书 · Defender 未报威胁 |
 
 ---
 

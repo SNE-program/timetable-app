@@ -502,6 +502,21 @@ export function ColorField(props: {
  * 收起时**不渲染正文**（不是用 CSS 藏起来）：里面的文件选择框、日历、滑杆
  * 都不会白白挂载，所以"收起来"同时也是省一份渲染。
  */
+/**
+ * 检查用：`?expand=1` 让所有可收起的面板默认展开。
+ *
+ * 收起之后那些内容就**不再挂载**了 —— 于是"展开状态下排版对不对"这件事
+ * 在布局自检里会变成测不到。这个参数就是把那个状态摆出来给自检看。
+ */
+let expandAllCache: boolean | null = null;
+function expandAllForCheck(): boolean {
+  if (expandAllCache !== null) return expandAllCache;
+  try {
+    expandAllCache = new URLSearchParams(window.location.search).get('expand') === '1';
+  } catch (e) { expandAllCache = false; }
+  return expandAllCache;
+}
+
 export function Panel(props: {
   title?: string;
   sub?: string;
@@ -514,7 +529,7 @@ export function Panel(props: {
   /** 标题行右侧的附加内容（计数、状态标签等） */
   aside?: React.ReactNode;
 }) {
-  const [open, setOpen] = React.useState(!!props.defaultOpen);
+  const [open, setOpen] = React.useState(!!props.defaultOpen || expandAllForCheck());
 
   if (!props.collapsible) {
     return (
