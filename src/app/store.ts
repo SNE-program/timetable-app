@@ -47,6 +47,7 @@ import {
 import { loadSession, saveSession, freshToken } from '../cloud/session';
 import { cloudConfigured, cloudHost } from '../cloud/config';
 import { checkForUpdate, updateSummary, type CheckResult } from './update';
+import { syncPromptFor } from '../cloud/syncAsk';
 import { updateManifestUrls } from './meta';
 import { canInstallApk, downloadAndInstallApk, openInstallSettings } from '../platform/appUpdate';
 import { emailRedirectUrl } from './meta';
@@ -78,6 +79,11 @@ export interface Prefs {
   privacySeen: boolean;
   /** 启动时自动检查更新（默认开；只是读一个静态文件，可在设置里关掉） */
   autoCheckUpdate: boolean;
+  /**
+   * 打开应用时自动登录（默认开）。
+   * 关掉之后：本次仍然登录着，**下次打开需要重新输入密码** —— 登录状态不会被恢复。
+   */
+  autoLogin: boolean;
   /**
    * 排查工具。开启后才显示诊断、检查、排程明细、存储占用这些排查用面板 ——
    * 它们对日常使用没有价值，却占了设置页一大半篇幅。
@@ -300,6 +306,7 @@ function loadPrefs(): Prefs {
         permissionAsked: !!p.permissionAsked,
         privacySeen: !!p.privacySeen,
         autoCheckUpdate: p.autoCheckUpdate === undefined ? true : !!p.autoCheckUpdate,
+        autoLogin: p.autoLogin === undefined ? true : !!p.autoLogin,
         debug: !!p.debug,
         mascot: loadMascotPrefs(p.mascot),
       };
@@ -312,6 +319,7 @@ function loadPrefs(): Prefs {
        ?demo=1 是开发预览入口，也不该被这屏挡住。 */
     privacySeen: hasAnyLocalData() || wantDemo(),
     autoCheckUpdate: true,
+    autoLogin: true,
     /* ?debug=1 直接进排查工具，省得每次手点开关 */
     debug: wantDebug(),
     mascot: defaultMascotPrefs(),
@@ -617,7 +625,7 @@ function initialState(): AppState {
     history: { undo: 0, redo: 0, lastLabel: null },
     notify: initialNotify(),
     upcoming: [],
-    cloud: initialCloud(),
+    cloud: initialCloud(loadPrefs().autoLogin !== false),
     update: { checking: false, result: null, progress: null, error: '', sheet: false },
   };
 }
@@ -1449,6 +1457,8 @@ export interface CloudState {
   notice: string;
   /** 云端那一行的信息；null 表示还没查或云端没有备份 */
   backup: CloudBackupInfo | null;
+  /** 登录成功后是否正在询问"要怎么同步" */
+  syncAsk: boolean;
   /** 是否正在显示「设置新密码」面板（找回密码的链接进来时自动打开） */
   passwordSheet: boolean;
   /** 从邮件链接回来时的类型：signup / recovery / … */
@@ -1475,9 +1485,16 @@ export interface CloudState {
  *   3. 出错（链接过期 / 用过）就把原因写进 error，让面板说人话；
  *   4. **处理完把 fragment 抹掉** —— 否则刷新一次就重新登录一次，而且那串令牌会留在地址栏里。
  */
-function initialCloud(): CloudState {
+function initialCloud(autoLogin: boolean): CloudState {
+  /*
+   * 自动登录关掉时：**不恢复登录状态**，并且把本机存的刷新令牌清掉。
+   * 清掉是刻意的 —— 留着它等于"用户以为关了自动登录，实际下次还是自动登录"。
+   * 本次会话不受影响（这次的登录状态在内存里），下次打开才需要重新输密码。
+   */
+  const restored = autoLogin ? loadSession() : null;
+  if (!autoLogin) saveSession(null);
   const base: CloudState = {
-    session: loadSession(), busy: '', error: '', notice: '', backup: null, passwordSheet: false, linkType: '',
+    session: restored, busy: '', error: '', notice: '', backup: null, syncAsk: false, passwordSheet: false, linkType: '',
     /* ?open=cloud：开发与无头检查用，直接把云弹层打开 */
     sheet: openParam() === 'cloud',
     mascots: [], mascotsLoaded: false, mascotsBusy: false, mascotsError: '', quota: null,
@@ -1562,7 +1579,8 @@ export async function cloudRegister(email: string, password: string): Promise<vo
     saveSession(session);
     setCloud({ session: session, busy: '', notice: '已登录：' + session.user.email });
     showToast('已登录', 'ok');
-    void cloudLoadInfo();
+    /* 拉完云端备份信息再问"要怎么同步" —— 那一问的内容取决于云端有没有备份 */
+    void cloudLoadInfo().then(function () { askSync(); });
   } catch (e) { cloudFail(e, '注册失败'); }
 }
 
@@ -1574,7 +1592,7 @@ export async function cloudLogin(email: string, password: string): Promise<void>
     saveSession(session);
     setCloud({ session: session, busy: '' });
     showToast('已登录：' + session.user.email, 'ok');
-    void cloudLoadInfo();
+    void cloudLoadInfo().then(function () { askSync(); });
   } catch (e) { cloudFail(e, '登录失败'); }
 }
 
@@ -1785,7 +1803,8 @@ export async function cloudFillProfile(): Promise<void> {
     const next: CloudSession = Object.assign({}, s, { user: { id: me.id || s.user.id, email: me.email || s.user.email } });
     saveSession(next);
     setCloud({ session: next });
-    void cloudLoadInfo();
+    /* 从邮件链接进来的人同样要面对"用哪一份"的问题，所以也问一次 */
+    void cloudLoadInfo().then(function () { askSync(); });
   } catch (e) { /* 补不到就算了，登录状态本身还在 */ }
 }
 
@@ -1954,6 +1973,59 @@ export async function cloudDeleteMascot(m: CloudMascot): Promise<void> {
 /** 界面用：配额那一行字 */
 export function cloudQuotaLine(): string {
   return quotaLine(state.cloud.quota);
+}
+
+
+/* ------------------------------ 登录后的同步询问 ------------------------------ */
+
+/**
+ * 登录/注册成功之后问一句"要怎么同步"。
+ *
+ * 直接问而不是自动合并：这一版刻意只做手动同步，而"往哪边覆盖"猜错就是丢数据。
+ * 两边都空时不问（没什么可同步的），免得登录完立刻弹一个没内容的框。
+ */
+function askSync(): void {
+  const local = state.data.courses.length;
+  const cloudHasBackup = !!state.cloud.backup;
+  const kind = syncPromptFor({ localCourses: local, cloudHasBackup: cloudHasBackup }).kind;
+  setCloud({ syncAsk: kind !== 'none' });
+}
+
+export function closeSyncAsk(): void {
+  setCloud({ syncAsk: false });
+}
+
+/** 面板上的两个动作，直接复用备份 / 恢复那两条路 */
+export async function syncPromptAct(action: 'restore' | 'backup'): Promise<void> {
+  setCloud({ syncAsk: false });
+  if (action === 'restore') await cloudRestoreNow();
+  else await cloudBackupNow();
+}
+
+/**
+ * 启动时把登录状态续上（只在用户开着"自动登录"且确实登录过时跑）。
+ *
+ * 为什么要主动做一次而不是等用户操作：访问令牌只有一小时，隔夜再打开时它早就过期了，
+ * 界面却仍然显示"已登录" —— 用户点备份才发现要重新登录，是最让人恼火的一种失望。
+ * 这里在启动后安静地续一次期；续不上（被撤销 / 被删号）就如实清掉登录状态并说明。
+ *
+ * 注意这也是一次"没按按钮就发出的请求"，所以它只在**用户自己登录过**的前提下发生，
+ * 而且可以在设置里关掉自动登录，关掉之后启动时不会有这个请求。
+ */
+export async function cloudResume(): Promise<void> {
+  if (!cloudConfigured()) return;
+  if (state.prefs.autoLogin === false) return;
+  const s = state.cloud.session;
+  if (!s) return;
+  try {
+    await cloudToken();
+    /* 顺手把"上次备份是什么时候"刷出来 —— 面板一打开就是对的 */
+    await cloudLoadInfo();
+  } catch (e) {
+    /* cloudToken 失败时已经清掉登录状态，这里只把原因说出来 */
+    const msg = e instanceof Error ? e.message : String(e);
+    setCloud({ notice: msg, backup: null });
+  }
 }
 
 /** 设备名只用来在备份信息里区分来源，不参与恢复逻辑 */

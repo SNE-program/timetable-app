@@ -1,9 +1,9 @@
 import React from 'react';
-import { Panel } from './common';
+import { Panel, SwitchRow } from './common';
 import {
   cloudAvailable, cloudBackupLine, cloudBackupNow, cloudDeleteAccount, cloudDeleteBackup, cloudLoadInfo,
   cloudLogin, cloudLogout, cloudMailWeek, cloudRecover, cloudRegister, cloudRestoreNow, cloudServerHost,
-  openCloudPassword, useApp,
+  openCloudPassword, patchPrefs, useApp,
 } from '../app/store';
 
 /**
@@ -36,9 +36,19 @@ export default function CloudPanel() {
     <Panel
       title="云备份"
       sub={sub}
-      desc={'可选功能，默认关闭。只有你在下面按按钮时才会联网；备份存在项目自己的服务器上（'
-        + cloudServerHost() + '），不经过任何第三方。不登录的话，这个应用与以前一样完全离线。'}
+      desc={'可选功能，默认关闭。不登录的话，这个应用与以前一样完全离线；登录之后，打开应用会自动续一次'
+        + '登录状态（一次很轻的请求），其余时候只有你按按钮才会联网。备份存在项目自己的服务器上（'
+        + cloudServerHost() + '），不经过任何第三方。'}
     >
+      <SwitchRow
+        label="打开时自动登录"
+        sub={s.prefs.autoLogin !== false
+          ? '登录状态存在本机，下次打开应用自动续上（会发一次很轻的续期请求）；关掉之后下次打开需要重新输入密码'
+          : '已关闭：下次打开应用需要重新登录。本次仍然登录着，本机数据不受影响'}
+        on={s.prefs.autoLogin !== false}
+        onChange={function (v) { patchPrefs({ autoLogin: v }); }}
+      />
+
       {c.session ? (
         <React.Fragment>
           <div className="list-row">

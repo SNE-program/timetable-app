@@ -2,8 +2,8 @@ import React from 'react';
 import {
   closeSheets, dismissToast, importMascotPack, importMascotSheet, importThemeFromFile, jumpToDate, openAdd, openCourse,
   openMascotEditor, openSearch, openTask, patchMascotPrefs, patchPrefs, patchWallpaper, redo, removeMascot,
-  checkUpdateNow, cloudFillProfile, openCloudSheet, resolveConfirm, setNotify, setNotifyStatus, setSystemDark,
-  setTab, setWeek, showToast, takeMigrateNotes, undo, useApp,
+  checkUpdateNow, cloudFillProfile, cloudResume, openCloudSheet, resolveConfirm, setNotify, setNotifyStatus,
+  setSystemDark, setTab, setWeek, showToast, takeMigrateNotes, undo, useApp,
 } from './store';
 import { cloudConfigured } from '../cloud/config';
 import { ConfirmDialog } from '../ui/common';
@@ -20,6 +20,7 @@ import ChangelogSheet from '../ui/ChangelogSheet';
 import PasswordSheet from '../ui/PasswordSheet';
 import CloudSheet from '../ui/CloudSheet';
 import UpdateSheet from '../ui/UpdateSheet';
+import SyncSheet from '../ui/SyncSheet';
 import { onNotified, syncReminders } from './reminderRuntime';
 import { watchSystemTimeChanges } from './rescheduleWatch';
 import { consumePendingOpen } from '../platform/widget';
@@ -201,10 +202,21 @@ export default function App() {
    * 从邮件链接回来时补一次邮箱。
    * 链接里只有令牌、没有邮箱，所以登录状态先落地、再补一次资料（只跑一次）。
    */
+  /*
+   * 启动时把登录状态续上。
+   *
+   * 访问令牌只有一小时，隔夜再打开时它早过期了，界面却还显示"已登录" ——
+   * 用户点备份才发现要重新登录，是最让人恼火的一种失望。所以启动后安静地续一次期：
+   *   1. 从邮件链接进来的（还没邮箱）→ 先补资料，那里会顺带拉备份信息并问同步；
+   *   2. 平时自动登录的 → cloudResume() 续期 + 刷新"上次备份时间"。
+   * 续不上就如实清掉登录状态并说明原因，而不是留着一个点不动的"已登录"。
+   */
   React.useEffect(function () {
-    if (s.cloud.session && !s.cloud.session.user.email) void cloudFillProfile();
-    /* eslint-disable-next-line react-hooks/exhaustive-deps -- 只在缺邮箱时跑 */
-  }, [s.cloud.session]);
+    if (!s.cloud.session) return;
+    if (!s.cloud.session.user.email) { void cloudFillProfile(); return; }
+    void cloudResume();
+    /* eslint-disable-next-line react-hooks/exhaustive-deps -- 只在启动时跑一次 */
+  }, []);
 
   /*
    * 从邮件链接回来时，把结果说出来一次。
@@ -555,6 +567,8 @@ export default function App() {
       {/* 设置新密码：从邮件里的「重置密码」链接回来时自动打开，也可以从云备份面板进 */}
       {s.cloud.passwordSheet ? <PasswordSheet /> : null}
       {s.cloud.sheet ? <CloudSheet /> : null}
+      {/* 登录完之后问一句"要怎么同步" —— 猜错就是丢数据，所以不替用户选 */}
+      {s.cloud.syncAsk ? <SyncSheet /> : null}
       {s.update.sheet ? <UpdateSheet /> : null}
       {s.manualSheet ? <ManualView /> : null}
       {s.changelogSheet ? <ChangelogSheet /> : null}
