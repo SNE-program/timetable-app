@@ -94,7 +94,12 @@
 | 版本 | versionCode **60** / versionName **1.8.3** |
 | 新增文件 | `src/mascot/prewarm.ts`、`src/storage/batch.test.ts`、`src/app/cloudLoad.test.ts` |
 | 主要改动 | `src/mascot/motion.ts`、`src/ui/Mascot.tsx`、`src/app/diagnostics.ts`、`src/app/store.ts`、`src/cloud/mascots.ts`、`src/storage/index.ts`、`src/ui/MascotCloudSection.tsx` |
-| Android | `课表助手-v1.8.3.apk` · 9.23 MB · SHA-256 `51B73F3FD366721CF08B1119409472C0AA9BBB5CC3E472408A00B2F225FD74B1` · 与之前各版同一张证书（可覆盖安装）· Defender 未报威胁 |
+| Android | `课表助手-v1.8.3.apk` · 9.23 MB（9,681,815 字节）· SHA-256 `55446DAB6CAE12D64154EA1F53B7DE2AF7FE99C3BDEB59A87EAA53A61F841130` · 与之前各版同一张证书（可覆盖安装）· Defender 未报威胁 |
+
+> 安装包有两个来源，**以线上那份为准**：本机为了核对签名与内容先打了一份（9,681,731 字节），
+> 推 tag 之后 CI 从同一份源码重新构建并覆盖了下载地址与 Release 附件（9,681,815 字节，差 84 字节 ——
+> 构建环境不同，AGP 的产物不是逐位可复现的）。页面与上面这行写的是**线上正在提供的那一份**的校验值。
+> 「构建过程可复现」的做法因此改成：**由 tag 触发 CI 出包**，本机那份只当预检。
 
 ---
 
