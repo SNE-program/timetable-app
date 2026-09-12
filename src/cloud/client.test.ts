@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import {
-  CloudError, callFunction, deleteBackup, fetchBackup, saveBackup, sendRecover, signIn, signOut, signUp,
+  CloudError, callFunction, deleteBackup, fetchBackup, fetchMe, saveBackup, sendRecover, signIn, signOut,
+  signUp, updatePassword,
 } from './client';
 import { __setCloudConfigForTest } from './config';
 
@@ -118,6 +119,21 @@ describe('云备份请求层', function () {
   it('退出登录：服务器报错也不该让本地退出失败', async function () {
     stub(function () { return { status: 500, text: 'boom' }; });
     await expect(signOut('t')).resolves.toBeUndefined();
+  });
+
+  it('改密码：PUT /auth/v1/user，带用户令牌', async function () {
+    const calls = stub(function () { return { json: {} }; });
+    await updatePassword('token-1', 'newpassword');
+    expect(calls[0].method).toBe('PUT');
+    expect(calls[0].url).toBe('https://demo.supabase.co/auth/v1/user');
+    expect(calls[0].headers.Authorization).toBe('Bearer token-1');
+    expect(JSON.parse(calls[0].body)).toEqual({ password: 'newpassword' });
+  });
+
+  it('读当前用户：拿到邮箱', async function () {
+    stub(function () { return { json: { id: 'u1', email: 'a@b.c' } }; });
+    const me = await fetchMe('t');
+    expect(me).toEqual({ id: 'u1', email: 'a@b.c' });
   });
 
   it('找回密码：带上重定向地址', async function () {

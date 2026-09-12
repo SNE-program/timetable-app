@@ -2,8 +2,8 @@ import React from 'react';
 import {
   closeSheets, dismissToast, importMascotPack, importMascotSheet, importThemeFromFile, jumpToDate, openAdd, openCourse,
   openMascotEditor, openSearch, openTask, patchMascotPrefs, patchPrefs, patchWallpaper, redo, removeMascot,
-  resolveConfirm, setNotify, setNotifyStatus, setSystemDark, setTab, setWeek, showToast, takeMigrateNotes, undo,
-  useApp,
+  cloudFillProfile, resolveConfirm, setNotify, setNotifyStatus, setSystemDark, setTab, setWeek, showToast,
+  takeMigrateNotes, undo, useApp,
 } from './store';
 import { ConfirmDialog } from '../ui/common';
 import Welcome from '../ui/Welcome';
@@ -16,6 +16,7 @@ import ErrorBoundary from '../ui/ErrorBoundary';
 import MascotEditor from '../ui/MascotEditor';
 import { isVideoFile, videoToSpriteSheet } from '../theme/videoSheet';
 import ChangelogSheet from '../ui/ChangelogSheet';
+import PasswordSheet from '../ui/PasswordSheet';
 import { onNotified, syncReminders } from './reminderRuntime';
 import { watchSystemTimeChanges } from './rescheduleWatch';
 import { consumePendingOpen } from '../platform/widget';
@@ -192,6 +193,15 @@ export default function App() {
     window.addEventListener('keydown', onKey);
     return function () { window.removeEventListener('keydown', onKey); };
   }, [wide, s.week]);
+
+  /*
+   * 从邮件链接回来时补一次邮箱。
+   * 链接里只有令牌、没有邮箱，所以登录状态先落地、再补一次资料（只跑一次）。
+   */
+  React.useEffect(function () {
+    if (s.cloud.session && !s.cloud.session.user.email) void cloudFillProfile();
+    /* eslint-disable-next-line react-hooks/exhaustive-deps -- 只在缺邮箱时跑 */
+  }, [s.cloud.session]);
 
   /* 数据迁移过就提示一次 */
   React.useEffect(function () {
@@ -459,6 +469,8 @@ export default function App() {
       {s.exportSheet ? <ExportSheet /> : null}
       {s.importSheet ? <ImportSheet /> : null}
       {s.mascotEditor ? <MascotEditor mode={s.mascotEditor} key={s.mascotEditor} /> : null}
+      {/* 设置新密码：从邮件里的「重置密码」链接回来时自动打开，也可以从云备份面板进 */}
+      {s.cloud.passwordSheet ? <PasswordSheet /> : null}
       {s.manualSheet ? <ManualView /> : null}
       {s.changelogSheet ? <ChangelogSheet /> : null}
 

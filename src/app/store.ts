@@ -34,10 +34,11 @@ import {
   popRedo, popUndo, pushRedo, pushUndo, recordChange, redoSize, resetHistory, undoSize, type ChangeSource,
 } from './history';
 import {
-  CloudError, callFunction, deleteBackup, fetchBackup, saveBackup, sendRecover,
-  signIn as cloudSignInApi, signOut as cloudSignOutApi, signUp as cloudSignUpApi,
+  CloudError, callFunction, deleteBackup, fetchBackup, fetchMe, saveBackup, sendRecover,
+  signIn as cloudSignInApi, signOut as cloudSignOutApi, signUp as cloudSignUpApi, updatePassword,
   type CloudSession,
 } from '../cloud/client';
+import { parseAuthLink } from '../cloud/link';
 import { buildBackupWithinLimit, describeBackup, formatTime, restoreAssets, validateBackup } from '../cloud/backup';
 import { loadSession, saveSession, freshToken } from '../cloud/session';
 import { cloudConfigured, cloudHost } from '../cloud/config';
@@ -1432,10 +1433,51 @@ export interface CloudState {
   notice: string;
   /** 云端那一行的信息；null 表示还没查或云端没有备份 */
   backup: CloudBackupInfo | null;
+  /** 是否正在显示「设置新密码」面板（找回密码的链接进来时自动打开） */
+  passwordSheet: boolean;
+  /** 从邮件链接回来时的类型：signup / recovery / … */
+  linkType: string;
 }
 
+/**
+ * 启动时的云状态。
+ *
+ * 这里要处理**邮件链接回跳**：确认邮箱 / 重置密码的链接会 302 回站点，
+ * 并把凭据放在 URL 的 fragment 里。以前完全没看它 —— 用户点了链接回来仍是未登录，
+ * 「找回密码」这条路等于断了。所以：
+ *
+ *   1. 认得出 fragment 里的令牌就当场登录；
+ *   2. type=recovery 时直接把「设置新密码」面板打开；
+ *   3. 出错（链接过期 / 用过）就把原因写进 error，让面板说人话；
+ *   4. **处理完把 fragment 抹掉** —— 否则刷新一次就重新登录一次，而且那串令牌会留在地址栏里。
+ */
 function initialCloud(): CloudState {
-  return { session: loadSession(), busy: '', error: '', notice: '', backup: null };
+  const base: CloudState = {
+    session: loadSession(), busy: '', error: '', notice: '', backup: null, passwordSheet: false, linkType: '',
+  };
+  let link = null;
+  try { link = parseAuthLink(window.location.hash, window.location.search); } catch (e) { link = null; }
+  if (link && link.kind === 'session' && link.session) {
+    const session = link.session;
+    saveSession(session);
+    base.session = session;
+    base.linkType = link.type || '';
+    base.passwordSheet = link.type === 'recovery';
+    base.notice = link.type === 'recovery'
+      ? '邮件里的链接已验证，请在下面设置新密码。'
+      : '邮箱已验证，已为你登录。';
+  } else if (link && link.kind === 'error') {
+    base.error = link.message || '邮件链接不能用，请在应用里重新申请一次';
+    base.linkType = link.type || '';
+  }
+  if (link && link.kind !== 'none') {
+    try {
+      /* 抹掉 fragment / 邮件链接带的查询参数，不产生新的历史记录 */
+      const clean = window.location.pathname + window.location.search.replace(/[?&](code|error|error_code|error_description)=[^&]*/g, '').replace(/^&/, '?');
+      window.history.replaceState(null, '', clean);
+    } catch (e) { /* 拿不到 history 就算了 */ }
+  }
+  return base;
 }
 
 function setCloud(patch: Partial<CloudState>): void {
@@ -1694,6 +1736,54 @@ export async function cloudMailWeek(): Promise<void> {
     setCloud({ busy: '', notice: '课表已发到 ' + s.user.email + '。没收到就看一眼垃圾邮件。' });
     showToast('邮件已发出', 'ok');
   } catch (e) { cloudFail(e, '发信失败'); }
+}
+
+/**
+ * 邮件链接登录后补一次资料。
+ *
+ * 回跳链接里只有令牌，没有邮箱（Supabase 不保证带 user_id / email），
+ * 所以登录状态先落地、再补一次 GET /auth/v1/user 把邮箱填上。
+ * 这一步只会在"刚点了邮件链接"之后跑一次，平时不会发请求。
+ */
+export async function cloudFillProfile(): Promise<void> {
+  const s = state.cloud.session;
+  if (!cloudConfigured() || !s || s.user.email) return;
+  try {
+    const me = await fetchMe(await cloudToken());
+    if (!me.id && !me.email) return;
+    const next: CloudSession = Object.assign({}, s, { user: { id: me.id || s.user.id, email: me.email || s.user.email } });
+    saveSession(next);
+    setCloud({ session: next });
+    void cloudLoadInfo();
+  } catch (e) { /* 补不到就算了，登录状态本身还在 */ }
+}
+
+export function openCloudPassword(): void {
+  setCloud({ passwordSheet: true, error: '', notice: '' });
+}
+
+export function closeCloudPassword(): void {
+  setCloud({ passwordSheet: false });
+}
+
+/**
+ * 设置 / 修改密码。
+ *
+ * 两条入口共用：找回密码的链接（凭临时会话）与登录后的「修改密码」。
+ * 成功后不清除登录状态 —— 让他接着用就行，这也是 Supabase 的默认行为。
+ */
+export async function cloudSetPassword(password: string): Promise<boolean> {
+  if (!cloudConfigured() || !state.cloud.session) return false;
+  setCloud({ busy: 'mail', error: '', notice: '' });
+  try {
+    await updatePassword(await cloudToken(), password);
+    setCloud({ busy: '', passwordSheet: false, notice: '密码已更新，下次用新密码登录。' });
+    showToast('密码已更新', 'ok');
+    return true;
+  } catch (e) {
+    cloudFail(e, '设置密码失败');
+    return false;
+  }
 }
 
 /** 设备名只用来在备份信息里区分来源，不参与恢复逻辑 */

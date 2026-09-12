@@ -2,7 +2,8 @@ import React from 'react';
 import { Panel } from './common';
 import {
   cloudAvailable, cloudBackupLine, cloudBackupNow, cloudDeleteAccount, cloudDeleteBackup, cloudLoadInfo,
-  cloudLogin, cloudLogout, cloudMailWeek, cloudRecover, cloudRegister, cloudRestoreNow, cloudServerHost, useApp,
+  cloudLogin, cloudLogout, cloudMailWeek, cloudRecover, cloudRegister, cloudRestoreNow, cloudServerHost,
+  openCloudPassword, useApp,
 } from '../app/store';
 
 /**
@@ -69,6 +70,14 @@ export default function CloudPanel() {
               </div>
             </div>
             <div className="lr-right">{c.busy === 'mail' ? '发送中…' : '›'}</div>
+          </div>
+
+          <div className="list-row tap" style={{ cursor: 'pointer' }} onClick={openCloudPassword}>
+            <div>
+              <div className="lr-label">修改密码</div>
+              <div className="lr-sub">不用收邮件，直接在这里改</div>
+            </div>
+            <div className="lr-right">›</div>
           </div>
 
           <div className="list-row tap" style={{ cursor: 'pointer' }} onClick={function () { void cloudDeleteBackup(); }}>

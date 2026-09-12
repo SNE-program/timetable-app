@@ -26,7 +26,10 @@
 | Functions Secrets | `RESEND_API_KEY`、`MAIL_FROM` 已设置 |
 | Auth SMTP | `smtp.resend.com:465`（用户 `resend`），发件人 `课表助手 <noreply@wzmssf.club>` |
 | Site URL / 回调 | `https://sne-program.github.io/timetable-app/` + 本地 5273 |
-| 发件域名 | `wzmssf.club`（已验证）；`timble.bond` 已在 Resend 建好，**还差 DNS 记录** |
+| 发件域名 | **`timble.bond`**（已验证并启用）|
+| 邮件限额 | `rate_limit_email_sent` = **30/小时**（默认只有 2/小时，一小时内第三个同学就注册不了）|
+| 邮件模板 | 已改成中文（确认邮箱 / 重置密码），署名「课表助手」|
+| 邮件链接回跳 | 客户端会认 fragment 里的令牌并自动登录，见 `src/cloud/link.ts`；`type=recovery` 会打开「设置新密码」|
 
 重新部署（改了函数源码之后）：
 

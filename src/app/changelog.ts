@@ -46,6 +46,17 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 
 export const CHANGELOG: ChangeEntry[] = [
   {
+    version: '1.6.1',
+    date: '',
+    title: '把邮件链接这条路走通',
+    items: [
+      { kind: 'fix', text: '**点邮件里的链接回来，现在真的管用了**：以前「确认邮箱」「重置密码」的链接跳回应用后仍是未登录状态，重置密码这一步等于是断的。现在点开会直接登录；重置密码的链接还会自动打开「设置新密码」。' },
+      { kind: 'new', text: '登录之后可以直接在「云备份」里**修改密码**，不用再收一封邮件。' },
+      { kind: 'note', text: '账号邮件改成了中文，署名「课表助手」，发件人是 noreply@timble.bond —— 以前是服务商的英文默认模板，同学收到多半会当成垃圾邮件。' },
+      { kind: 'note', text: '处理完邮件链接会把地址栏里那串令牌抹掉：刷新不会重复登录，截图或转发链接也不会把凭据带出去。' },
+    ],
+  },
+  {
     version: '1.6.0',
     date: '',
     title: '可选云备份：换设备不用再导文件',

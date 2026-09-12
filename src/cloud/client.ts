@@ -175,6 +175,21 @@ export async function sendRecover(email: string, redirectTo?: string): Promise<v
   await request('POST', path, { body: { email: email } });
 }
 
+/**
+ * 改密码（已登录时用；从找回密码的链接进来时，那个临时会话也算"已登录"）。
+ * 走 PUT /auth/v1/user，与 Supabase 的 updateUser({password}) 等价。
+ */
+export async function updatePassword(accessToken: string, password: string): Promise<void> {
+  await request('PUT', '/auth/v1/user', { token: accessToken, body: { password: password } });
+}
+
+/** 读当前登录者的资料（拿邮箱用 —— 回跳链接里不一定带邮箱） */
+export async function fetchMe(accessToken: string): Promise<CloudUser> {
+  const json = await request('GET', '/auth/v1/user', { token: accessToken });
+  const j = (json || {}) as Record<string, unknown>;
+  return { id: String(j.id || ''), email: String(j.email || '') };
+}
+
 export async function signOut(accessToken: string): Promise<void> {
   try {
     await request('POST', '/auth/v1/logout', { token: accessToken });
