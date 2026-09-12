@@ -70,6 +70,13 @@ export default function MascotArt(props: {
   jitter?: { speed: number; amp: number };
   /** 正在播的一次性反应；没有就是 null */
   reaction?: MascotReaction | null;
+  /**
+   * 这个反应是不是**已经由角色包自带的 react 素材**在演了。
+   *
+   * 是的话就不再叠 rx-* 那套 transform —— 作者自己画的动作比我们转一下好看得多，
+   * 两套叠在一起还会互相打架（这一条就是"少一些自己的简易动画"的落点）。
+   */
+  reactionIsAsset?: boolean;
   /** 反应序号：每被点一次 +1，用来可靠地重启动画（同类反应连着两次也要重新播） */
   reactionSeq?: number;
   /** 正在走动（横移到别处） */
@@ -176,16 +183,18 @@ export default function MascotArt(props: {
   const innerRef = React.useRef<HTMLDivElement>(null);
   const reaction = props.reaction || null;
   const reactionSeq = props.reactionSeq || 0;
+  /** 素材自己在演反应时，程序化那一层完全让位 */
+  const reactionIsAsset = !!props.reactionIsAsset;
   React.useEffect(function () {
     const el = innerRef.current;
-    if (!el || !reaction || paused) return;
+    if (!el || !reaction || reactionIsAsset || paused) return;
     const cls = 'rx-' + reaction;
     el.classList.remove('rx-hop', 'rx-sway', 'rx-startle', 'rx-peek');
     /* 强制一次重排，让动画从头开始 */
     void el.offsetWidth;
     el.classList.add(cls);
     return function () { el.classList.remove(cls); };
-  }, [reaction, reactionSeq, paused]);
+  }, [reaction, reactionSeq, reactionIsAsset, paused]);
 
   const vars = motionVars(motion, phase, behavior, jitter, !!paused) as React.CSSProperties;
   /* 单格渲染宽度：比例还不知道时先用 3/4 顶着，量到之后立刻换成真值 */

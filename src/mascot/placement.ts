@@ -136,10 +136,20 @@ export function walkRoom(homeX: number, drift: number, viewW: number, edge: numb
  *
  * 方向带一点**回归**倾向：已经偏到一边（|drift| > 24px）时更可能往回走，
  * 于是它会在家附近来回逛，而不是一路走出去。
+ *
+ * ## 时长由距离和速度算出来，不再独立掷
+ *
+ * 原来"走多远"和"走多久"是两个独立的随机数（24–72px、11–20 秒），
+ * 而微动作窗口只有 5–9 秒 —— 于是每一趟都在半路被打断：**步子的速度只有 2–4 px/s，
+ * 迈了半天几乎还在原地**（用户的原话）。现在给的是**速度**（px/s），
+ * 时长 = 距离 ÷ 速度，并且夹在 `[minMs, maxMs]` 内 ——
+ * 这一趟一定能在动作窗口里走完。
  */
 export function planWalkStep(
   room: WalkRoom, drift: number, minStep: number, maxStep: number,
-  minMs: number, maxMs: number, rng: () => number
+  speed: { min: number; max: number }, rng: () => number,
+  /** 时长的硬边界：默认 [1200, 9500]，后者要留在 walk 那个微动作窗口内 */
+  msRange?: { min: number; max: number }
 ): { to: number; ms: number; dir: 1 | -1 } | null {
   const from = Math.min(room.hi, Math.max(room.lo, drift));
   const roomLeft = from - room.lo;
@@ -159,7 +169,14 @@ export function planWalkStep(
   if (step < 8) return null;
 
   const to = Math.round(from + dir * step);
-  const ms = Math.round(minMs + Math.max(0, Math.min(1, rng())) * (maxMs - minMs));
+  /*
+   * 速度取区间内的随机值 → 时长 = 距离 ÷ 速度。
+   * 上下界是"别瞬移、也别把一趟拖到下个世纪"的兜底。
+   */
+  const lo = msRange && isFinite(msRange.min) ? Math.max(200, msRange.min) : 1200;
+  const hi = msRange && isFinite(msRange.max) ? Math.max(lo + 100, msRange.max) : 9500;
+  const pxPerSec = Math.max(1, speed.min + Math.max(0, Math.min(1, rng())) * Math.max(0, speed.max - speed.min));
+  const ms = Math.round(Math.min(hi, Math.max(lo, step / pxPerSec * 1000)));
   return { to: to, ms: ms, dir: dir };
 }
 

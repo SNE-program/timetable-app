@@ -34,6 +34,14 @@ import { countRender } from '../app/renderCount';
 const TAP_SLOP = 6;
 /** 按住多久弹快捷菜单。和课程卡的长按（600ms）保持一致 */
 const LONG_PRESS_MS = 600;
+/**
+ * 踱步速度（px/s）。
+ *
+ * 取 9–14：在 360px 宽的屏幕上横穿一次要半分钟左右，是"慢悠悠踱步"该有的样子；
+ * 而上一版的有效速度只有 2–4 px/s（距离与时长各掷各的，每趟都被动作窗口打断），
+ * 那已经不是慢，是"基本没动"。
+ */
+const WALK_SPEED = { min: 9, max: 14 };
 /** 课前多久开始"招手" */
 const GREET_WINDOW_MS = 10 * 60 * 1000;
 /** 招手的间隔范围：随机取值，固定间隔会变成准点报时 */
@@ -279,6 +287,14 @@ export default function MascotOverlay() {
         /* 检查用：把"睡 → 醒 → 睡"的节奏压短（不带 ?doze= 时这两个字段是 undefined） */
         stirMs: dozeDev ? dozeDev.stirMs : undefined,
         wakeMs: dozeDev ? dozeDev.wakeMs : undefined,
+        /*
+         * 自发小动作的频率：默认 0.14（少一些自己的简易动画）；
+         * 角色包**自带 react 素材**时调高 —— 那时候播的是素材自己的动画，
+         * 多来几次正是"变化多基于给定动画"。
+         */
+        selfChance: reactAssetOk ? 0.3 : undefined,
+        /* 作者自己画了走动素材，那就多走两步（见 motion.ts 的 walkBias） */
+        walkBias: walkAssetOk ? 2.2 : 1,
       };
       const next = advance(rt, now, dragRef.current.active, opts);
       if (next !== rt) setRt(next);
@@ -365,8 +381,16 @@ export default function MascotOverlay() {
    * 素材按**相位 + 微动作**一起选：走动时优先用角色的 walk 素材（有的话）。
    * 没有 walk 素材就在界面上把区别补出来（见下面 fakeGait）。
    */
-  const stateKey = assetKeyFor(phase, rt.behavior, avail);
+  const stateKey = assetKeyFor(phase, rt.behavior, avail, !!rt.reaction);
   const asset: MascotAsset | undefined = pack ? pack.states[stateKey] : undefined;
+  /*
+   * 正在播的反应是**角色包自带的 react 素材**吗？
+   * 是的话就不再叠程序化动作（rx-*）—— 作者自己画的动作比我们转一下好看得多，
+   * 两套叠在一起还会互相打架。这一条同时管住"被点"和"自己动一下"两种情况。
+   */
+  const reactAssetOk = avail.indexOf('react') >= 0;
+  const walkAssetOk = avail.indexOf('walk') >= 0;
+  const reactionIsAsset = !!rt.reaction && stateKey === 'react';
 
   /* -------------------- 位置 -------------------- */
 
@@ -417,7 +441,15 @@ export default function MascotOverlay() {
   React.useEffect(function () {
     const r = walkRoomRef.current;
     if (walking && r) {
-      if (!walkPlan) setWalkPlan(planWalkStep(r, driftRef.current, 24, 72, 11000, 20000, rngRef.current));
+      /*
+       * 一趟走多远、走多快。
+       *
+       * 以前是「24–72px、走 11–20 秒」，而微动作窗口只有 5–9 秒 —— 每一趟都在半路被打断，
+       * **有效速度只剩 2–4 px/s**，看起来就是"迈了半天几乎还在原地"（用户的原话）。
+       * 现在给的是**速度**（px/s），时长由距离算出来，一定落在动作窗口内：
+       * 9–14 px/s 走 2.4–8 秒 ≈ 34–72px 一步，约是原来的三倍，仍然是慢悠悠的踱步。
+       */
+      if (!walkPlan) setWalkPlan(planWalkStep(r, driftRef.current, 34, 72, WALK_SPEED, rngRef.current));
       return;
     }
     if (walkPlan) {
@@ -549,7 +581,10 @@ React.useEffect(function () {
       if (pack && pack.interactive.click) {
         /* 记一次互动：接下来几分钟它会更活泼（能量值会短暂上升） */
         interactionsRef.current = interactionsRef.current.concat([Date.now()]).slice(-12);
-        setRt(function (cur) { return poke(cur, Date.now(), rngRef.current); });
+        setRt(function (cur) {
+          /* 自带 react 素材时至少播 0.9 秒：逐帧动画通常比我们那 0.5 秒长 */
+          return poke(cur, Date.now(), rngRef.current, reactAssetOk ? 900 : 0);
+        });
         setReactionSeq(function (n) { return n + 1; });
       }
       return;
@@ -590,6 +625,7 @@ React.useEffect(function () {
           behavior={rt.behavior}
           jitter={rt.jitter}
           reaction={rt.reaction}
+          reactionIsAsset={reactionIsAsset}
           reactionSeq={reactionSeq + (rt.reactionSeq || 0)}
           walking={walking}
           gait={walking && fakeGait}

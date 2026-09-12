@@ -148,7 +148,7 @@ describe('走动这一步怎么走', function () {
   const rng = function (v: number) { return function () { return v; }; };
 
   it('落在区间内，朝向与位移符号一致', function () {
-    const p = planWalkStep(room, 0, 24, 64, 11000, 20000, rng(0.9));
+    const p = planWalkStep(room, 0, 34, 72, { min: 9, max: 14 }, rng(0.9));
     expect(p).not.toBeNull();
     expect(p!.to).toBeGreaterThanOrEqual(room.lo);
     expect(p!.to).toBeLessThanOrEqual(room.hi);
@@ -157,36 +157,48 @@ describe('走动这一步怎么走', function () {
 
   it('★ 已经偏到一边时会往回走（不会一路走出去）', function () {
     /* 随机数固定为 0.9（本来会往右），但 drift 已经 +50 —— 应当改往左 */
-    const p = planWalkStep(room, 50, 24, 64, 11000, 20000, rng(0.9));
+    const p = planWalkStep(room, 50, 34, 72, { min: 9, max: 14 }, rng(0.9));
     expect(p!.dir).toBe(-1);
     expect(p!.to).toBeLessThan(50);
   });
 
   it('★ 走到区间端点时还能往回走（不会卡死在边上）', function () {
-    const p = planWalkStep(room, 60, 24, 64, 11000, 20000, rng(0.9));
+    const p = planWalkStep(room, 60, 34, 72, { min: 9, max: 14 }, rng(0.9));
     expect(p).not.toBeNull();
     expect(p!.dir).toBe(-1);
     expect(p!.to).toBeLessThanOrEqual(60);
   });
 
-  it('★ 速度：一趟 11–20 秒（比上一版慢一倍以上）', function () {
-    const p = planWalkStep(room, 0, 24, 64, 11000, 20000, rng(0.5));
-    expect(p!.ms).toBeGreaterThanOrEqual(11000);
-    expect(p!.ms).toBeLessThanOrEqual(20000);
+  it('★ 时长由距离和速度算出来，而且一定能在动作窗口里走完', function () {
+    /*
+     * 这一条钉的是「迈了半天还在原地」那个毛病：以前距离与时长是两个独立的随机数
+     * （24–72px、11–20 秒），而微动作窗口只有 5–9 秒 —— 每一趟都在半路被打断，
+     * 有效速度只剩 2–4 px/s。现在给的是速度，时长 = 距离 ÷ 速度。
+     */
+    const speed = { min: 9, max: 14 };
+    for (let i = 0; i <= 10; i++) {
+      const p = planWalkStep(room, 0, 34, 72, speed, rng(i / 10))!;
+      const dist = Math.abs(p.to);
+      const realSpeed = dist / (p.ms / 1000);
+      expect(realSpeed).toBeGreaterThanOrEqual(speed.min - 1.5);
+      expect(realSpeed).toBeLessThanOrEqual(speed.max + 1.5);
+      /* 而且不会拖到动作窗口（4500–10000ms）之外 */
+      expect(p.ms).toBeLessThanOrEqual(10000);
+    }
   });
 
   it('步长不会超过剩余空间', function () {
     const tight = { lo: 0, hi: 30 };
-    const p = planWalkStep(tight, 0, 24, 64, 11000, 20000, rng(0.9));
+    const p = planWalkStep(tight, 0, 34, 72, { min: 9, max: 14 }, rng(0.9));
     expect(p!.to).toBeLessThanOrEqual(30);
   });
 
   it('剩不下 8px 就不走了', function () {
-    expect(planWalkStep({ lo: 0, hi: 5 }, 0, 24, 64, 11000, 20000, rng(0.5))).toBeNull();
+    expect(planWalkStep({ lo: 0, hi: 5 }, 0, 34, 72, { min: 9, max: 14 }, rng(0.5))).toBeNull();
   });
 
   it('drift 落在区间外时先收回区间内（脏数据兜底）', function () {
-    const p = planWalkStep(room, 999, 24, 64, 11000, 20000, rng(0.5));
+    const p = planWalkStep(room, 999, 34, 72, { min: 9, max: 14 }, rng(0.5));
     expect(p).not.toBeNull();
     expect(p!.to).toBeLessThanOrEqual(room.hi);
   });

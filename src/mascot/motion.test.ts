@@ -5,7 +5,7 @@ import {
   initialRuntime, motionVars, nextWakeAt, pickWeighted, poke, rollBehavior, rollReaction, touch,
 } from './motion';
 import { MASCOT_STATES } from './types';
-import type { MascotBehavior, MascotRuntime, Rng } from './motion';
+import type { MascotBehavior, MascotReaction, MascotRuntime, Rng } from './motion';
 
 const T0 = 1_700_000_000_000;
 
@@ -208,10 +208,12 @@ describe('微动作', function () {
 });
 
 describe('来回走走', function () {
-  it('在动作池里，且时长明显比其它动作长', function () {
+  it('在动作池里，且时长明显比其它动作长（还要容得下"一趟走完"）', function () {
     expect(ALL_BEHAVIORS).toContain('walk');
-    expect(BEHAVIORS.walk.minMs).toBeGreaterThanOrEqual(5000);
-    expect(BEHAVIORS.walk.maxMs).toBeLessThanOrEqual(9000);
+    /* 下界 4.5 秒、上界 10 秒：一趟步子（34–72px ÷ 9–14px/s ≈ 2.4–8 秒）要能走完 */
+    expect(BEHAVIORS.walk.minMs).toBeGreaterThanOrEqual(4500);
+    expect(BEHAVIORS.walk.maxMs).toBeLessThanOrEqual(10000);
+    expect(BEHAVIORS.walk.minMs).toBeGreaterThan(BEHAVIORS.breathe.minMs - 1000);
   });
 
   it('★ 精力中等偏上时最想走，深夜（能量低）时几乎不走', function () {
@@ -268,21 +270,24 @@ describe('来回走走', function () {
 });
 
 describe('反应变体', function () {
-  it('有四种，四种都会出现', function () {
+  it('三种程序化反应都会出现（左右摇摆那种已经删掉）', function () {
     const rng = seeded(30);
     const seen = new Set<string>();
-    let recent: ('hop' | 'sway' | 'startle' | 'peek')[] = [];
+    let recent: MascotReaction[] = [];
     for (let i = 0; i < 200; i++) {
       const r = rollReaction(recent, rng);
       seen.add(r);
       recent = [r].concat(recent).slice(0, 2);
     }
     expect(seen.size).toBe(ALL_REACTIONS.length);
+    /* 少一些自己的简易动画：左右摇摆那条被删掉了 */
+    expect(ALL_REACTIONS).not.toContain('sway' as never);
+    expect(ALL_REACTIONS.length).toBe(3);
   });
 
   it('★ 不会连着两次同一个反应', function () {
     const rng = seeded(31);
-    let recent: ('hop' | 'sway' | 'startle' | 'peek')[] = [];
+    let recent: MascotReaction[] = [];
     for (let i = 0; i < 200; i++) {
       const r = rollReaction(recent, rng);
       expect(r).not.toBe(recent[0]);
@@ -573,9 +578,8 @@ describe('自发小动作（没人点也会自己动一下）', function () {
   });
 });
 
-describe('新增的微动作', function () {
-  it('张望 / 点头进了动作池，并且会被掷到', function () {
-    expect(ALL_BEHAVIORS).toContain('look');
+describe('自己的简易动画 · 少而克制', function () {
+  it('点头进了动作池并且会被掷到', function () {
     expect(ALL_BEHAVIORS).toContain('nod');
     const rng = seeded(90);
     let recent: MascotBehavior[] = [];
@@ -585,30 +589,72 @@ describe('新增的微动作', function () {
       seen.add(r.behavior);
       recent = [r.behavior].concat(recent).slice(0, 2);
     }
-    expect(seen.has('look')).toBe(true);
     expect(seen.has('nod')).toBe(true);
   });
 
-  it('★ 配比让"点头"与"张望"落在不同的通道上（不是同一个动作换速度）', function () {
-    const baseBob = parseFloat(motionVars(MOTION, 'idle', 'breathe', NO_JITTER, false)['--m-bob']);
-    const baseSway = parseFloat(motionVars(MOTION, 'idle', 'breathe', NO_JITTER, false)['--m-sway']);
-    const nod = motionVars(MOTION, 'idle', 'nod', NO_JITTER, false);
-    const look = motionVars(MOTION, 'idle', 'look', NO_JITTER, false);
-    /* 同一条通道横向比：点头的上下更多，张望的左右更多 */
-    expect(parseFloat(nod['--m-bob']) / baseBob).toBeGreaterThan(parseFloat(look['--m-bob']) / baseBob);
-    expect(parseFloat(look['--m-sway']) / baseSway).toBeGreaterThan(parseFloat(nod['--m-sway']) / baseSway);
+  it('★ 左右摇摆那一类已经不在了（"东张西望"整个动作被删掉）', function () {
+    expect(ALL_BEHAVIORS).not.toContain('look' as never);
+    expect(ALL_REACTIONS).not.toContain('sway' as never);
+    /* 七个动作：呼吸 / 抖一下 / 伸展 / 抬头 / 打哈欠 / 走走 / 点头 */
+    expect(ALL_BEHAVIORS.length).toBe(7);
   });
 
-  it('睡着了挑不到"张望 / 点头"这类醒着才有的动作（权重为 0 或极低）', function () {
+  it('★ 摆动通道只减不增：行为层不会把素材的 sway 放大', function () {
+    const base = parseFloat(motionVars(MOTION, 'idle', 'breathe', NO_JITTER, false)['--m-sway'].replace('deg', ''));
+    /* 幅度最大的几个动作（伸展 1.85、抖一下 1.5）都不许把摇摆乘上去 */
+    for (const b of ALL_BEHAVIORS) {
+      const v = parseFloat(motionVars(MOTION, 'idle', b, { speed: 1, amp: 1.14 }, false)['--m-sway'].replace('deg', ''));
+      expect(v).toBeLessThanOrEqual(base + 0.001);
+    }
+    /* 点头几乎不摆：明显低于基准 */
+    const nod = parseFloat(motionVars(MOTION, 'idle', 'nod', NO_JITTER, false)['--m-sway'].replace('deg', ''));
+    expect(nod).toBeLessThan(base * 0.5);
+  });
+
+  it('睡着了挑不到"点头 / 走走"这类醒着才有的动作（权重为 0 或极低）', function () {
     const rng = seeded(91);
     let recent: MascotBehavior[] = [];
     let awakeish = 0;
     for (let i = 0; i < 300; i++) {
       const r = rollBehavior(0.8, recent, rng, { dozing: true, allowWalk: false });
-      if (r.behavior === 'look' || r.behavior === 'nod' || r.behavior === 'walk') awakeish++;
+      if (r.behavior === 'nod' || r.behavior === 'walk') awakeish++;
       recent = [r.behavior].concat(recent).slice(0, 2);
     }
     expect(awakeish / 300).toBeLessThan(0.2);
+  });
+
+  it('★ 角色包自带 react 素材时，反应播的是素材本身（不再叠程序化动作）', function () {
+    expect(assetKeyFor('react', 'breathe', ['idle', 'react'], true)).toBe('react');
+    /* 没有 react 素材才退回 idle，由界面层加 rx-* 类 */
+    expect(assetKeyFor('react', 'breathe', ['idle'], true)).toBe('idle');
+    /* 没在播反应时不会去切 react 素材 */
+    expect(assetKeyFor('idle', 'breathe', ['idle', 'react'], false)).toBe('idle');
+    /* 走动仍然优先 walk 素材 */
+    expect(assetKeyFor('idle', 'walk', ['idle', 'walk', 'react'], false)).toBe('walk');
+  });
+
+  it('自发小动作的概率可以由调用方按素材情况调（自带素材时可以多来几次）', function () {
+    const rng = seeded(92);
+    let rt = initialRuntime(T0, rng);
+    let now = T0;
+    let few = 0;
+    for (let i = 0; i < 300; i++) {
+      const before = rt.reaction;
+      rt = advance(rt, now, false, { energy: 0.6, rng: rng, allowWalk: true });
+      if (rt.reaction && rt.reaction !== before) few++;
+      now = nextWakeAt(rt, { sleepAfterMs: SLEEP_AFTER_MS });
+    }
+    const rng2 = seeded(92);
+    let rt2 = initialRuntime(T0, rng2);
+    let now2 = T0;
+    let many = 0;
+    for (let i = 0; i < 300; i++) {
+      const before = rt2.reaction;
+      rt2 = advance(rt2, now2, false, { energy: 0.6, rng: rng2, allowWalk: true, selfChance: 0.4 });
+      if (rt2.reaction && rt2.reaction !== before) many++;
+      now2 = nextWakeAt(rt2, { sleepAfterMs: SLEEP_AFTER_MS });
+    }
+    expect(many).toBeGreaterThan(few);
   });
 });
 

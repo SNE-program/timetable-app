@@ -49,6 +49,12 @@ function runBehaviorCheck(seconds: number): void {
   let minAnchor = Infinity;
   let maxAnchor = -Infinity;
   let walkSamples = 0;
+  /** 走动时累计走了多少像素（相邻采样的锚点位移）—— "步子有没有真的迈出去"就看这个 */
+  let walkPx = 0;
+  let lastAnchorX: number | null = null;
+  /** 反应由谁演：素材（data-state=react）/ 我们的程序化动作（rx-* 类） */
+  let reactionByAsset = 0;
+  let reactionByProc = 0;
   /** 走动时实际用的是哪张素材（data-state）—— "走路与休息有没有区分开"就看它 */
   const walkStates: Record<string, boolean> = {};
   /** 走动时有没有在跑"迈步"动作（没有 walk 素材时才应该有） */
@@ -102,6 +108,16 @@ function runBehaviorCheck(seconds: number): void {
       reactions++;
       lastReaction = rx;
       reactionKinds.push(rx);
+      /*
+       * 这个反应是谁在演？
+       *   素材 —— 角色包自带 react 素材，界面切到了 data-state=react，且没有 rx-* 类
+       *   程序 —— 我们叠的那套 rx-* transform
+       * 这一版的要求是"变化多基于给定动画"，所以这两个数要能分开看。
+       */
+      const state = host && host.getAttribute('data-state');
+      const byProc = el.className.indexOf('rx-') >= 0;
+      if (state === 'react' && !byProc) reactionByAsset++;
+      else if (byProc) reactionByProc++;
     }
     if (!rx) lastReaction = '';
     if (b === 'walk') {
@@ -128,6 +144,9 @@ function runBehaviorCheck(seconds: number): void {
         const ax = r.left + r.width / 2;
         if (ax < minAnchor) minAnchor = ax;
         if (ax > maxAnchor) maxAnchor = ax;
+        /* 走动期间累计里程：相邻两次采样的锚点位移之和 */
+        if (b === 'walk' && lastAnchorX !== null) walkPx += Math.abs(ax - lastAnchorX);
+        lastAnchorX = ax;
       }
     }
   }, 200);
@@ -141,6 +160,7 @@ function runBehaviorCheck(seconds: number): void {
     const text = 'BEHAVE ' + dur + 's 采样' + samples + '次 动作种类=' + kinds.length
       + ' 切换' + Math.max(0, seq.length - 1) + '次 最长同动作=' + (longestRun / 1000).toFixed(1) + 's'
       + ' 反应=' + reactions + '次' + (reactionKinds.length ? '[ ' + reactionKinds.join(' ') + ' ]' : '')
+      + ' | 反应来源: 素材' + reactionByAsset + '/程序' + reactionByProc
       + ' | 睡' + sleeps + '次 半醒' + stirs + '轮(采样' + stirSamples + '/' + samples + ')'
       + ' 睡着采样' + sleepSamples + '/' + samples
       + ' | 相位: ' + phaseSeq.join(' → ')
@@ -160,7 +180,7 @@ function runBehaviorCheck(seconds: number): void {
             + ' 可用区[' + EDGE_MARGIN + ',' + (vw - EDGE_MARGIN) + ']'
             + ' 锚点越界=' + (minAnchor < EDGE_MARGIN - 1 || maxAnchor > vw - EDGE_MARGIN + 1 ? '是(!!)' : '否')
             + ' 本体 x∈[' + Math.round(minLeft) + ',' + Math.round(maxRight) + ']（可挂屏幕外）'
-            + ' 走动采样' + walkSamples + '/' + samples
+            + ' 走动采样' + walkSamples + '/' + samples + ' 走动里程' + Math.round(walkPx) + 'px'
             + (walkSamples > 0
               ? ' 走动时素材=' + Object.keys(walkStates).join('/') + ' 迈步动作采样' + gaitSamples
                 + ' 翻面' + mirrorSamples + '/正常' + normalSamples
