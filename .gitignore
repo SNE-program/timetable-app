@@ -23,6 +23,11 @@ build.log
 
 # 个人的东西，不要跟着公开仓库出去
 时间表.txt
+# 密钥合集（GitHub / Supabase / Resend）：**绝不能进公开仓库**
+权限合集.txt
+*权限*.txt
+.env
+.env.*
 
 # Android
 # 发布签名的私钥与密码绝不能进版本库

@@ -8,6 +8,87 @@
 
 ---
 
+## v1.6.0
+
+可选云备份：Supabase + Resend，默认关闭
+
+这一版加的是**一个可选功能**：把课表备份到自己的服务器上，换设备不用再导文件。
+底线没有动 —— 不登录就完全离线，这一点有单测与实测守着。
+
+**① 定位：默认关着的可选功能**
+
+| | 没登录 | 登录后 |
+| --- | --- | --- |
+| 界面 | 设置页不出现「云备份」面板；没配置 Supabase 的构建里连代码路径都不存在 | 出现面板：立即备份 / 从云端恢复 / 发邮件 / 删除 |
+| 网络 | **一个请求都不发**（有单测断言）| 只有点按钮才发：登录、备份、恢复、发信、删除 |
+| 数据 | 只在本机 | 本机为主，云端一份最新备份 |
+
+**② 服务端：两张表 + 行级安全**
+
+`supabase/schema.sql` 建 `timetables`（一人一行，主键就是 `auth.users.id`）与 `mail_log`（发信记账）：
+
+- 两张表都开 RLS；`timetables` 四条策略全部限定 `auth.uid() = user_id`；
+- `mail_log` **不建任何策略**并 `revoke` 掉客户端权限 —— 只有服务端的 service_role 能写；
+- `payload` 有 1 MB 的体积约束（客户端先算字节并按需丢图片，数据库再兜一道）；
+- `updated_at` 用触发器维护，时间戳以服务器为准。
+
+**③ 客户端：不引入 SDK**
+
+只为「登录 + 备份一张表」装一个几百 KB 的 `@supabase/supabase-js` 不划算，而这个项目从第一天起就只有 React 与 Capacitor 两个运行时依赖。
+所以 `src/cloud/client.ts` 直接对着 Supabase 的 HTTP 接口写：
+`/auth/v1/signup`、`/auth/v1/token`、`/auth/v1/recover`、`/auth/v1/logout`、`/rest/v1/timetables`、
+`/functions/v1/…`，全部 JSON 进 JSON 出。附带三件事：20 秒超时、把 Supabase 的英文报错翻成人话（「Invalid login credentials」→「邮箱或密码不对」）、
+以及「没配置时一个请求都不发」这条能写进测试的性质。
+
+**④ 备份什么、不备份什么**
+
+| 进备份 | 不进备份 |
+| --- | --- |
+| 课表与时段、任务、出勤、学期与作息 | **角色包**（有自己的文件格式，体积大）|
+| 提醒规则、每日摘要、防误触这几项偏好（白名单，将来新增的本地设置不会自动上云）| 隐私是否已读、是否申请过权限这类本机状态 |
+| 外观主题，以及这些数据引用到的图片 | 图片过大时会被丢掉（并明确提示）|
+
+体积用**字节**判定而不是字符串长度 —— 一份全是中文的课表，UTF-8 字节数约是 `length` 的三倍，
+拿 `length` 当字节会低估三倍，等上线才发现「服务器拒收」就太晚了。这一条有专门的单测。
+
+**⑤ Edge Function 两个**
+
+| 函数 | 作用 | 为什么必须在服务端 |
+| --- | --- | --- |
+| `delete-account` | 注销：删云端备份 + 删 auth 用户 | 删用户要 service_role，那把钥匙能绕过所有 RLS |
+| `send-mail` | 把课表发到**调用者自己的**邮箱（Resend）| Resend key 只能放服务端；收件人只从 token 里取 |
+
+`send-mail` 刻意**不读请求体里的收件人** —— 一个能任意指定收件人的函数就是一台开放的垃圾邮件机，
+而 anon key 是公开的。它还有每小时 5 封 / 每天 20 封的记账限制。这两条都有测试扫源码守着。
+
+**⑥ 验证**
+
+| 项 | 结果 |
+| --- | --- |
+| 单元测试 | **488 通过 / 26 文件**（新增 33 条：请求层、备份内容、配置防线）|
+| 类型检查 | `tsc --noEmit` 0 错误 |
+| 真项目建表 | 在 `oglzpevmqpcmryznqaiu`（ap-northeast-2）执行 `schema.sql`：两张表 RLS = true，4 条策略，`mail_log` 0 条策略且无授权 |
+| **行级安全实测** | 开事务切角色跑：A 写自己 → 通过；A 冒充 B 写 → `violates row-level security policy`；A 读全表只看到自己 1 行；B 读全表 0 行；B 删 A 的行影响 0 行；anon 读写两张表全部 `permission denied` |
+| 配置防线 | 扫 `src/`：没有 service_role key、没有写死的 key；发信函数不读 `body.to` |
+
+**⑦ 还需要你做的两件事（都跟发邮件有关）**
+
+1. **发信域名**：Resend 要求发件域名通过 DNS 验证，而 `sne-program.github.io` 不是域名。
+   没有域名时它只能发给「注册 Resend 用的那个邮箱」，同学收不到确认/重置邮件。
+   替代方案：先在 Supabase 关掉 `Confirm email`，等有域名了再打开（步骤见 `supabase/README.md`）。
+2. **部署两个 Edge Function**：需要 Supabase CLI 或控制台（我没有你的 access token，做不了这一步），
+   两个命令写在 `supabase/README.md` 里。不部署也不影响备份与恢复，只是「发邮件」与「注销账号」会报错。
+
+**⑧ 交付**
+
+| 项目 | 结果 |
+| --- | --- |
+| 版本 | versionCode **52** / versionName **1.6.0** |
+| 新增文件 | `src/cloud/{config,client,session,backup}.ts`（+3 个测试）、`src/ui/CloudPanel.tsx`、`supabase/{schema.sql,README.md}`、`supabase/functions/{delete-account,send-mail}/index.ts` |
+| 前端依赖 | **没有新增**（仍然只有 React 与 Capacitor）|
+| Android | `课表助手-v1.6.0.apk` · 9.22 MB · SHA-256 `06C8F14FFA5548091828B7852BCCEEE8D27F332846489612C3627F8D1D249A57` · Defender `found no threats` · 与前几版同一张证书 |
+
+---
 ## v1.5.0
 
 电脑上也能好好用了 · 下载页

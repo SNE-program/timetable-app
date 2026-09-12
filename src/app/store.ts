@@ -28,10 +28,20 @@ import { extractAssets, hydrateAssets } from '../storage/assetRef';
 import { activeExports, type ActiveExport } from '../plugins/host';
 import {
   courseRows, currentWeek, exportFileName, termRows, toCsv, toGroupedMarkdown, toMarkdown, weekRows,
+  type ExportColumn,
 } from '../core/exporters';
 import {
   popRedo, popUndo, pushRedo, pushUndo, recordChange, redoSize, resetHistory, undoSize, type ChangeSource,
 } from './history';
+import {
+  CloudError, callFunction, deleteBackup, fetchBackup, saveBackup, sendRecover,
+  signIn as cloudSignInApi, signOut as cloudSignOutApi, signUp as cloudSignUpApi,
+  type CloudSession,
+} from '../cloud/client';
+import { buildBackupWithinLimit, describeBackup, formatTime, restoreAssets, validateBackup } from '../cloud/backup';
+import { loadSession, saveSession, freshToken } from '../cloud/session';
+import { cloudConfigured, cloudHost } from '../cloud/config';
+import { APP_VERSION } from './version';
 
 export type TabKey = 'week' | 'today' | 'tasks' | 'studio' | 'settings';
 export interface Toast { text: string; kind: 'info' | 'ok' | 'warn' | 'error'; undo?: () => void; }
@@ -145,6 +155,8 @@ export interface AppState {
   history: { undo: number; redo: number; lastLabel: string | null };
   notify: import('../platform/types').NotifierStatus | null;
   upcoming: import('../platform/types').NotifyItem[];
+  /** 云备份（可选功能）：没配置或没登录时，界面整块不出现 */
+  cloud: CloudState;
 }
 
 /* v2：默认不再内置占位课程，旧版本的演示数据通过换 key 自然作废 */
@@ -589,6 +601,7 @@ function initialState(): AppState {
     history: { undo: 0, redo: 0, lastLabel: null },
     notify: initialNotify(),
     upcoming: [],
+    cloud: initialCloud(),
   };
 }
 
@@ -1386,6 +1399,317 @@ export async function importThemeFromFile(file: File): Promise<void> {
   } catch (e) {
     showToast('导入失败：' + (e as Error).message, 'error');
   }
+}
+
+
+/* ============================================================================
+   云备份（可选功能，v1.6.0）
+   ----------------------------------------------------------------------------
+   定位：**默认完全本地**。没配置 Supabase（cloudConfigured() 为假）时，
+   这一整块在界面上不存在，应用里也没有任何一处会发起网络请求 ——
+   这一点是硬约束，不是"应该不会"。
+
+   配置了之后，也只有"用户主动点按钮"才会联网：
+   注册 / 登录 / 忘记密码 / 立即备份 / 从云端恢复 / 删除云端数据。
+   打开应用、切页面、改课表都不会偷偷上传。
+   ============================================================================ */
+
+export type CloudBusy = '' | 'signin' | 'signup' | 'recover' | 'load' | 'backup' | 'restore' | 'forget' | 'mail';
+
+export interface CloudBackupInfo {
+  updatedAt: string;
+  appVersion: string;
+  device: string;
+  summary: string;
+}
+
+export interface CloudState {
+  session: CloudSession | null;
+  busy: CloudBusy;
+  /** 上一次操作的错误，展示在面板里（不是一闪而过的提示条） */
+  error: string;
+  /** 需要用户读一句的话，比如"注册成功，去邮箱确认" */
+  notice: string;
+  /** 云端那一行的信息；null 表示还没查或云端没有备份 */
+  backup: CloudBackupInfo | null;
+}
+
+function initialCloud(): CloudState {
+  return { session: loadSession(), busy: '', error: '', notice: '', backup: null };
+}
+
+function setCloud(patch: Partial<CloudState>): void {
+  setState({ cloud: Object.assign({}, state.cloud, patch) });
+}
+
+/** 界面用：这个构建里有没有云备份能力 */
+export function cloudAvailable(): boolean {
+  return cloudConfigured();
+}
+
+/** 界面用：备份会发到哪台服务器（只显示域名） */
+export function cloudServerHost(): string {
+  return cloudHost();
+}
+
+export function cloudSignedIn(): boolean {
+  return !!state.cloud.session;
+}
+
+/** 统一的错误出口：既写进面板状态，也弹一次提示条 */
+function cloudFail(e: unknown, fallback: string): void {
+  const msg = e instanceof CloudError || e instanceof Error ? e.message : String(e);
+  const text = msg || fallback;
+  setCloud({ busy: '', error: text });
+  showToast(text, 'error');
+}
+
+/** 拿到当下可用的令牌；顺带处理"刷新失败 → 退出登录" */
+async function cloudToken(): Promise<string> {
+  const s = state.cloud.session;
+  if (!s) throw new CloudError('还没登录', 0, 'no_session');
+  try {
+    const next = await freshToken(s);
+    if (next !== s) { saveSession(next); setCloud({ session: next }); }
+    return next.accessToken;
+  } catch (e) {
+    saveSession(null);
+    setCloud({ session: null, backup: null });
+    throw e;
+  }
+}
+
+export async function cloudRegister(email: string, password: string): Promise<void> {
+  if (!cloudConfigured()) return;
+  setCloud({ busy: 'signup', error: '', notice: '' });
+  try {
+    const session = await cloudSignUpApi(email.trim(), password);
+    if (!session) {
+      /* 项目开了邮箱确认：这一步如实说明，别让人以为注册失败了 */
+      setCloud({ busy: '', notice: '注册成功。去 ' + email.trim() + ' 的收件箱点一下确认链接，再回来登录。' });
+      showToast('注册成功，请去邮箱确认', 'ok');
+      return;
+    }
+    saveSession(session);
+    setCloud({ session: session, busy: '', notice: '已登录：' + session.user.email });
+    showToast('已登录', 'ok');
+    void cloudLoadInfo();
+  } catch (e) { cloudFail(e, '注册失败'); }
+}
+
+export async function cloudLogin(email: string, password: string): Promise<void> {
+  if (!cloudConfigured()) return;
+  setCloud({ busy: 'signin', error: '', notice: '' });
+  try {
+    const session = await cloudSignInApi(email.trim(), password);
+    saveSession(session);
+    setCloud({ session: session, busy: '' });
+    showToast('已登录：' + session.user.email, 'ok');
+    void cloudLoadInfo();
+  } catch (e) { cloudFail(e, '登录失败'); }
+}
+
+export async function cloudRecover(email: string): Promise<void> {
+  if (!cloudConfigured()) return;
+  setCloud({ busy: 'recover', error: '', notice: '' });
+  try {
+    await sendRecover(email.trim(), window.location.origin + window.location.pathname);
+    setCloud({ busy: '', notice: '重置密码的邮件已发出，去 ' + email.trim() + ' 收件箱点链接即可设置新密码。' });
+    showToast('重置密码邮件已发出', 'ok');
+  } catch (e) { cloudFail(e, '发送失败'); }
+}
+
+export function cloudLogout(): void {
+  const s = state.cloud.session;
+  saveSession(null);
+  setCloud({ session: null, backup: null, error: '', notice: '已退出登录。云端的备份还在，本机数据不受影响。' });
+  if (s) void cloudSignOutApi(s.accessToken);
+  showToast('已退出登录（本机数据不受影响）', 'ok');
+}
+
+/** 查一眼云端备份的信息（登录后自动跑一次，也可以手动刷新） */
+export async function cloudLoadInfo(): Promise<void> {
+  if (!cloudConfigured() || !state.cloud.session) return;
+  setCloud({ busy: 'load', error: '' });
+  try {
+    const token = await cloudToken();
+    const row = await fetchBackup(token);
+    if (!row) {
+      setCloud({ busy: '', backup: null });
+      return;
+    }
+    const payload = validateBackup(row.payload);
+    setCloud({
+      busy: '',
+      backup: {
+        updatedAt: row.updated_at,
+        appVersion: row.app_version,
+        device: row.device,
+        summary: describeBackup(payload),
+      },
+    });
+  } catch (e) { cloudFail(e, '读取云端备份失败'); }
+}
+
+/**
+ * 立即备份。
+ *
+ * 体积超限时**丢图片而不是丢请求**：buildBackupWithinLimit 会退到"只备份课表与设置"，
+ * 并由调用方如实告诉用户图片没进去、该怎么带走（主题包 / 角色包）。
+ * 悄悄少传几张图是这一版最不能犯的错。
+ */
+export async function cloudBackupNow(): Promise<void> {
+  if (!cloudConfigured() || !state.cloud.session) return;
+  setCloud({ busy: 'backup', error: '' });
+  try {
+    const token = await cloudToken();
+    const built = buildBackupWithinLimit({
+      data: state.data,
+      prefs: state.prefs,
+      theme: state.theme,
+      appVersion: APP_VERSION || '',
+      device: deviceLabel(),
+    });
+    const row = await saveBackup(token, state.cloud.session.user.id, built.payload, APP_VERSION || '', deviceLabel());
+    setCloud({
+      busy: '',
+      backup: {
+        updatedAt: row.updated_at,
+        appVersion: row.app_version,
+        device: row.device,
+        summary: describeBackup(built.payload),
+      },
+    });
+    showToast(
+      built.droppedAssets
+        ? '已备份课表与设置，但图片太大没进去（请用主题包带走图片）'
+        : '已备份到云端：' + describeBackup(built.payload),
+      built.droppedAssets ? 'warn' : 'ok'
+    );
+  } catch (e) { cloudFail(e, '备份失败'); }
+}
+
+/** 从云端恢复：覆盖本机，走 setData 所以可以撤销 */
+export async function cloudRestoreNow(): Promise<void> {
+  if (!cloudConfigured() || !state.cloud.session) return;
+  setCloud({ busy: 'restore', error: '' });
+  try {
+    const token = await cloudToken();
+    const row = await fetchBackup(token);
+    if (!row) { setCloud({ busy: '' }); showToast('云端还没有备份', 'info'); return; }
+    const payload = validateBackup(row.payload);
+    const before = state.data.courses.length;
+    const ok = await confirmDanger(
+      '用云端备份覆盖本机？当前的 ' + before + ' 门课会被替换。'
+      + '（这是可撤销的一步，之后能点提示条上的「撤销」退回）',
+      '覆盖恢复'
+    );
+    if (!ok) { setCloud({ busy: '' }); return; }
+
+    const a = restoreAssets(payload);
+    /* 数据走 setData：记一笔历史，于是"恢复"这一步也能撤销 */
+    setData(payload.data, '从云端恢复', 'import');
+    /* 外观与偏好跟着一起回来（只覆盖白名单里的那几项） */
+    if (payload.theme && payload.theme.meta) {
+      const merged = Object.assign({}, state.theme, payload.theme);
+      persistTheme(merged);
+      setState({ theme: merged });
+    }
+    if (payload.prefs) patchPrefs(payload.prefs);
+    setWeek(clampWeek(weekOfDate(payload.data.term, todayISO())));
+    setCloud({
+      busy: '',
+      backup: {
+        updatedAt: row.updated_at,
+        appVersion: row.app_version,
+        device: row.device,
+        summary: describeBackup(payload),
+      },
+    });
+    showToast(
+      '已从云端恢复：' + describeBackup(payload) + (a.skipped ? '（' + a.skipped + ' 张图片不在备份里）' : ''),
+      a.skipped ? 'warn' : 'ok'
+    );
+  } catch (e) { cloudFail(e, '恢复失败'); }
+}
+
+/** 只删云端的备份，账号留着 */
+export async function cloudDeleteBackup(): Promise<void> {
+  const s = state.cloud.session;
+  if (!cloudConfigured() || !s) return;
+  const ok = await confirmDanger('删除云端的这份备份？账号会保留，本机数据也不受影响。', '删除备份');
+  if (!ok) return;
+  setCloud({ busy: 'forget', error: '' });
+  try {
+    const token = await cloudToken();
+    await deleteBackup(token, s.user.id);
+    setCloud({ busy: '', backup: null, notice: '云端备份已删除。' });
+    showToast('云端备份已删除', 'ok');
+  } catch (e) { cloudFail(e, '删除失败'); }
+}
+
+/**
+ * 注销账号：走 Edge Function（需要 service_role，客户端做不了）。
+ * 说清楚两件事：删的是账号与云端数据；**本机课表不会动**。
+ */
+export async function cloudDeleteAccount(): Promise<void> {
+  const s = state.cloud.session;
+  if (!cloudConfigured() || !s) return;
+  const ok = await confirmDanger(
+    '注销账号并删除云端数据？删掉之后无法恢复（本机课表不受影响，还会留着）。',
+    '注销账号'
+  );
+  if (!ok) return;
+  setCloud({ busy: 'forget', error: '' });
+  try {
+    const token = await cloudToken();
+    await callFunction('delete-account', token, {});
+    saveSession(null);
+    setCloud({ session: null, backup: null, busy: '', notice: '账号与云端数据已删除。本机课表还在。' });
+    showToast('账号与云端数据已删除，本机数据保留', 'ok');
+  } catch (e) { cloudFail(e, '注销失败'); }
+}
+
+/**
+ * 把本周课表发到自己的邮箱。
+ *
+ * 邮件正文由**客户端**算好再交给服务端 —— 服务端只负责发信。
+ * 这是刻意的：时间引擎在这个仓库里只有一份实现（src/core/engine.ts），
+ * 让 Edge Function 再算一遍"今天第几周、今天上什么课"，等于养第二份引擎，
+ * 迟早出现"邮件里和界面上不一样"的那种 bug。
+ *
+ * 收件人由服务端从 token 里取，客户端连 to 都不传。
+ */
+export async function cloudMailWeek(): Promise<void> {
+  const s = state.cloud.session;
+  if (!cloudConfigured() || !s) return;
+  const cols: ExportColumn[] = ['date', 'weekday', 'period', 'start', 'end', 'course', 'location', 'teacher'];
+  const rows = weekRows(state.data, state.week, cols);
+  if (rows.length === 0) { showToast('这一周没有课，就不用发了', 'info'); return; }
+  setCloud({ busy: 'mail', error: '', notice: '' });
+  try {
+    const token = await cloudToken();
+    const title = (state.data.term.name || '我的课表') + ' · 第 ' + state.week + ' 周';
+    await callFunction('send-mail', token, { subject: '课表助手 · ' + title, text: toMarkdown(rows, cols, title) });
+    setCloud({ busy: '', notice: '课表已发到 ' + s.user.email + '。没收到就看一眼垃圾邮件。' });
+    showToast('邮件已发出', 'ok');
+  } catch (e) { cloudFail(e, '发信失败'); }
+}
+
+/** 设备名只用来在备份信息里区分来源，不参与恢复逻辑 */
+function deviceLabel(): string {
+  const ua = typeof navigator === 'undefined' ? '' : (navigator.userAgent || '');
+  if (/Android/i.test(ua)) return 'Android';
+  if (/iPhone|iPad|iPod/i.test(ua)) return 'iOS';
+  if (/Macintosh/i.test(ua)) return 'Mac';
+  if (/Windows/i.test(ua)) return 'Windows';
+  return '浏览器';
+}
+
+/** 备份信息的展示文案（面板里用） */
+export function cloudBackupLine(info: CloudBackupInfo | null): string {
+  if (!info) return '云端还没有备份';
+  return formatTime(info.updatedAt) + ' · ' + info.device + ' · ' + info.summary;
 }
 
 /* ------------------------------ 其它动作 ------------------------------ */

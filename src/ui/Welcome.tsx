@@ -1,6 +1,7 @@
 import React from 'react';
 import { openManual, patchPrefs } from '../app/store';
 import { isNativePlatform } from '../platform/nativeBridge';
+import { cloudConfigured } from '../cloud/config';
 import { Icon, type IconName } from './icons';
 
 /**
@@ -21,9 +22,16 @@ const POINTS: { icon: IconName; title: string; sub: string }[] = [
   {
     icon: 'ban',
     title: '没有广告，也没有追踪',
+    /*
+     * 接上云备份之后，"一次网络请求都不发"这句话就不再准确了 ——
+     * 它仍然默认成立（不登录就不会联网），但必须把条件说出来，
+     * 否则用户以为"这东西永远不联网"，而某天点了备份才发现不是。
+     */
     sub: isNativePlatform()
       ? '不含任何广告或统计 SDK。应用申请的权限只有通知、闹钟和震动。'
-      : '不含任何广告或统计脚本，页面不会向任何服务器发请求。',
+        + (cloudConfigured() ? '云备份默认关闭，你不点就不会联网。' : '')
+      : '不含任何广告或统计脚本。'
+        + (cloudConfigured() ? '云备份默认关闭，你不点就不会联网。' : '页面不会向任何服务器发请求。'),
   },
   {
     icon: 'archive',

@@ -34,6 +34,12 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+        env:
+          # 云备份（可选）。仓库 Settings → Secrets and variables → Variables 里配置；
+          # 没配时构建出的就是完全离线的版本（面板不出现，也不会有任何网络请求）。
+          # anon key 是公开的；service_role key 不许进这里，也不许进前端。
+          VITE_SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

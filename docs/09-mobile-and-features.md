@@ -3652,6 +3652,95 @@ const today = todayISO();   // ← 真实的今天，而不是传入的 now
 
 
 
+## 十、可选云备份：Supabase + Resend（v1.6.0）
+
+这是第一个**会联网**的功能。所以这一节的重点不是「怎么接」，而是「怎么保证不接的时候什么都没变」。
+
+### 1. 先定死性质，再写代码
+
+| 性质 | 怎么保证 |
+| --- | --- |
+| 没配置就完全离线 | 构建期注入，两项为空时 `cloudConfigured()` 为假：面板不渲染、client 在入口直接抛错；单测断言「一个请求都不发」 |
+| 打开应用不联网 | 所有网络调用都挂在用户动作上；实测：把 `VITE_SUPABASE_URL` 指向本地服务，打开设置页并静置 6 秒，服务端日志里 0 条请求 |
+| 点按钮才联网 | 正对照：填表点「登录」后日志里出现且只出现一条 `MISS /fakesb/auth/v1/token` |
+| 读不到别人的数据 | 数据库行级安全 + 真项目实测（见第 6 节） |
+
+### 2. 服务端：两张表，四条策略，一条都不多
+
+`supabase/schema.sql` 是幂等的：
+
+- `timetables`：主键 `user_id` → `auth.users(id)`（一人一行），`payload jsonb` 存那份导出的 JSON；
+  四条策略分别对应读 / 写 / 改 / 删，条件全是 `auth.uid() = user_id`；
+- `mail_log`：发信记账，**故意不建策略**并 `revoke` 掉 `anon, authenticated` —— 只有 service_role 能碰；
+- 体积上限用 `pg_column_size(payload) < 1048576` 兜一道，客户端已经先算过字节；
+- `updated_at` 由触发器维护（客户端时钟不可信）。
+
+### 3. 客户端：不引入 SDK
+
+为了「登录 + 读写一张表」而装 `@supabase/supabase-js`（几百 KB）与本项目的依赖立场不符 ——
+运行时依赖到现在仍然只有 React 与 Capacitor。所以 `src/cloud/client.ts` 直接对着 HTTP 接口写，
+顺带做了三件小事：20 秒超时、`AbortController` 取消、把 Supabase 的英文报错翻成人话。
+
+翻译这件事有个真实的教训：本地假服务器回 `404` + 正文 `no` 时，界面就真的显示了一个 `no`。
+改成「只有像句子的原文才原样显示」，其余按状态码给一句能照着做的话（`404` →「接口地址不对」）。
+
+### 4. 备份的边界（写进界面，也写进测试）
+
+字节数用 `TextEncoder` 精确算，**不能拿 `length` 顶替** —— 一份全中文的课表，`length` 会低估约三倍。
+自引用还带来一个小坑：第一次量的时候 `stats.bytes` 是 `0`（一位数字），写回去变成四位数，
+于是记录的值比真实值少 3 字节 —— 单测直接把这个差值抓了出来（`expected 5906 to be 5909`），改成量两次才对。
+
+偏好走白名单：`reminderOffsets / dailyBrief / briefHour / confirmDestructive / studioLocked`。
+将来新增的本地设置不会自动跟着上云 —— 这比「记得手动排除」可靠。
+角色包不进备份（有自己的文件格式，体积大），界面与说明书都写明了。
+
+### 5. Edge Function：两个，安全性质由测试守着
+
+| 函数 | 关键性质 |
+| --- | --- |
+| `delete-account` | 身份只从 token 查（`/auth/v1/user`），不接受客户端传 user id；用 service_role 删数据与账号 |
+| `send-mail` | **不读 `body.to`**，收件人只来自 token；每小时 5 封 / 每天 20 封；key 只从环境变量读 |
+
+`src/cloud/schema.test.ts` 读这几个源文件做断言：每张表都开了 RLS、`timetables` 恰好 4 条策略、`mail_log` 0 条、
+`src/` 下不出现 service_role key 与写死的 JWT、发信函数不读请求体里的收件人。
+这类「写错就是事故」的配置，用读文件断言比运行时测试便宜，也比人眼可靠。
+
+### 6. 在真项目上做了什么、看到什么
+
+项目 `oglzpevmqpcmryznqaiu`（区域 ap-northeast-2）：
+
+| 动作 | 结果 |
+| --- | --- |
+| 执行 `schema.sql` | 两张表 `relrowsecurity = true`；`timetables` 4 条策略、`mail_log` 0 条；`mail_log` 对 `anon/authenticated` 无任何授权 |
+| 切角色实测 RLS | A 写自己 → 通过；A 冒充 B 写 → `violates row-level security policy`；A 读全表只看到自己 1 行；B 读全表 0 行；B 删 A 的行影响 0 行；anon 读写两张表全部 `permission denied` |
+| 清理 | 测试账号与数据全部删净：结束时 `timetables 0 行、auth.users 0 个` |
+
+顺带记两条只有真做过才知道的事：
+
+1. **直连数据库在这台机器上不通**：Supabase 的 `db.<ref>.supabase.co` 只解析出 IPv6，而这里没有 IPv6 出口；
+   改用 pooler（`aws-0-<region>.pooler.supabase.com`，用户名 `postgres.<ref>`）才连上。区域是逐个试出来的。
+2. **手搓一个能登录的 auth 用户很难**：GoTrue 读用户时会扫到一批列，缺一个就 500 `Database error querying schema`。
+   所以行级安全改用「切角色 + `request.jwt.claims`」来测，不依赖 auth 服务，反而更接近 RLS 的真实判定条件。
+
+### 7. 还没做完的两件事
+
+- **Edge Function 尚未部署**：需要 Supabase CLI 或 access token，我手上没有。所以「发邮件」与「注销账号」两个按钮现在会报错；备份与恢复不受影响。
+- **发信域名**：Resend 要求发件域名过 DNS 验证，`sne-program.github.io` 不是域名。没有域名时它只能发给注册 Resend 用的那个邮箱，
+  同学收不到确认 / 重置邮件 —— 这是「注册后必须去邮箱确认」这条路径目前唯一的堵点（可先在 Auth 里关掉 Confirm email）。
+
+### 8. 交付
+
+| 项目 | 结果 |
+| --- | --- |
+| 版本 | versionCode **52** / versionName **1.6.0** |
+| 单测 | 489 通过 / 26 文件；`tsc --noEmit` 0 错误 |
+| 新增依赖 | **0**（前端仍然只有 React 与 Capacitor）|
+| Android | `课表助手-v1.6.0.apk` · 9.22 MB · SHA-256 `06C8F14FFA5548091828B7852BCCEEE8D27F332846489612C3627F8D1D249A57` · Defender `found no threats` |
+
+
+
+
+
 
 
 

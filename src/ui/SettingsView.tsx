@@ -13,10 +13,12 @@ import { APP_VERSION } from '../app/version';
 import { MAX_WEEK } from '../core/types';
 import { DateField, Panel, SwitchRow } from './common';
 import PluginsPanel from './PluginsPanel';
+import CloudPanel from './CloudPanel';
 import WidgetPanel from './WidgetPanel';
 import WebReminderPanel from './WebReminderPanel';
 import { isNativePlatform } from '../platform/nativeBridge';
 import { DOWNLOAD_PAGE } from '../app/meta';
+import { cloudConfigured } from '../cloud/config';
 import DebugSection from './DebugSection';
 
 const REMIND_OPTIONS = [30, 15, 10, 5];
@@ -544,6 +546,9 @@ export default function SettingsView() {
         </div>
       </Panel>
 
+      {/* 云备份：没配置 Supabase 时这块自己不渲染 */}
+      <CloudPanel />
+
       <PluginsPanel />
 
       <Panel>
@@ -601,8 +606,12 @@ export default function SettingsView() {
         ) : null}
         <div className="panel-desc">
           {isNativePlatform()
-            ? '所有数据只保存在这台设备上，不会上传到任何服务器。提醒由系统闹钟负责，息屏或关闭应用后依然有效。随时可以在「课表数据」里导出完整备份。'
-            : '这是网页版：数据只保存在这个浏览器里，清除站点数据会一起清掉，不会上传到任何服务器。提醒靠页面内的通知，需要页面保持打开。换设备前请先在「课表数据」里导出完整备份。'}
+            ? '所有数据只保存在这台设备上。提醒由系统闹钟负责，息屏或关闭应用后依然有效。随时可以在「课表数据」里导出完整备份。'
+              + (cloudConfigured() ? '云备份是可选的：不登录就不会上传任何东西。' : '不会上传到任何服务器。')
+            : '这是网页版：数据只保存在这个浏览器里，清除站点数据会一起清掉。提醒靠页面内的通知，需要页面保持打开。'
+              + (cloudConfigured()
+                ? '云备份是可选的：不登录就不会上传任何东西；换设备前也可以先用它备一份。'
+                : '不会上传到任何服务器。换设备前请先在「课表数据」里导出完整备份。')}
         </div>
       </Panel>
     </div>

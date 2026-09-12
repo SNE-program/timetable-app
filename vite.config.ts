@@ -22,6 +22,12 @@ export default defineConfig({
     __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
     __APP_VERSION__: JSON.stringify(pkg.version),
     __REPO_URL__: JSON.stringify(repoUrl),
+    /*
+     * 云备份（可选）：为空时前端整块功能不出现，应用保持"完全离线"。
+     * anon key 是公开的（数据安全靠数据库的 RLS），service_role key 绝不能出现在这里。
+     */
+    __SUPABASE_URL__: JSON.stringify(process.env.VITE_SUPABASE_URL || ''),
+    __SUPABASE_ANON_KEY__: JSON.stringify(process.env.VITE_SUPABASE_ANON_KEY || ''),
   },
   server: { host: '127.0.0.1', port: 5273, strictPort: true },
   /*
