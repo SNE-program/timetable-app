@@ -71,7 +71,34 @@
 | **行级安全实测** | 开事务切角色跑：A 写自己 → 通过；A 冒充 B 写 → `violates row-level security policy`；A 读全表只看到自己 1 行；B 读全表 0 行；B 删 A 的行影响 0 行；anon 读写两张表全部 `permission denied` |
 | 配置防线 | 扫 `src/`：没有 service_role key、没有写死的 key；发信函数不读 `body.to` |
 
-**⑦ 还需要你做的两件事（都跟发邮件有关）**
+**⑦ 服务端已上线（部署当天补记）**
+
+| 项 | 状态 |
+| --- | --- |
+| 建表 | 已在项目 `oglzpevmqpcmryznqaiu` 执行，两张表 RLS 已开（4 条策略 / 0 条策略）|
+| Edge Function | `send-mail` 与 `delete-account` 已部署：status=ACTIVE、verify_jwt=true |
+| 函数密钥 | `RESEND_API_KEY` 与 `MAIL_FROM` 写进 Functions Secrets（不进仓库、不进前端）|
+| 认证邮件 | Auth 的 SMTP 指向 Resend（smtp.resend.com:465，用户 resend）；Site URL 与回调白名单已配 |
+| 发件域名 | 用**已验证**的 `wzmssf.club`；`timble.bond` 已在 Resend 建好，还差 DNS 记录 |
+
+实测（都是真调用，不是本地 mock）：
+
+- 注册 → Supabase 通过 Resend 发出确认邮件，Resend 后台显示 `delivered`；
+- 登录 → 写备份 HTTP 201 → 读回 1 行；
+- 调 `send-mail` → `{"ok":true,"id":"1afb8060…"}`，Resend 显示 `delivered`，并且 `mail_log` 记了一行；
+- 调 `delete-account` → `{"ok":true}`，账号 404、备份行与发信记录随级联删除；
+- 未验证域名时 `send-mail` 会拒绝并返回一句人话（`发件域名还没在 Resend 里验证通过`）—— 这条错误翻译也顺带测到了。
+
+想换成 `timble.bond` 发信，在 DNS 里加这三条（Resend 控制台 Domains → timble.bond 页面有同样的值）：
+
+| 类型 | 主机 | 值 |
+| --- | --- | --- |
+| TXT | `resend._domainkey` | `p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCw0Bd6unqPd0GF9AZq27…`（完整值见 Resend 面板）|
+| MX（优先级 10）| `send` | `feedback-smtp.us-east-1.amazonses.com` |
+| TXT | `send` | `v=spf1 include:amazonses.com ~all` |
+
+加完在 Resend 点验证，然后把函数密钥 `MAIL_FROM` 与 Auth 的发件人改成 `noreply@timble.bond` 即可。
+**⑧ 当时需要你做的两件事（已完成）**
 
 1. **发信域名**：Resend 要求发件域名通过 DNS 验证，而 `sne-program.github.io` 不是域名。
    没有域名时它只能发给「注册 Resend 用的那个邮箱」，同学收不到确认/重置邮件。

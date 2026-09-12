@@ -17,7 +17,29 @@
 
 ---
 
-## 一次性部署（四步）
+## 现状（2026-09-12 已部署）
+
+| 项 | 状态 |
+| --- | --- |
+| 建表 | 已执行，两张表 RLS 已开 |
+| Edge Function | `send-mail` / `delete-account` 已部署（ACTIVE、verify_jwt=true）|
+| Functions Secrets | `RESEND_API_KEY`、`MAIL_FROM` 已设置 |
+| Auth SMTP | `smtp.resend.com:465`（用户 `resend`），发件人 `课表助手 <noreply@wzmssf.club>` |
+| Site URL / 回调 | `https://sne-program.github.io/timetable-app/` + 本地 5273 |
+| 发件域名 | `wzmssf.club`（已验证）；`timble.bond` 已在 Resend 建好，**还差 DNS 记录** |
+
+重新部署（改了函数源码之后）：
+
+```bash
+$env:SUPABASE_ACCESS_TOKEN = 'sbp_...'
+npx supabase functions deploy send-mail --project-ref oglzpevmqpcmryznqaiu --use-api
+npx supabase functions deploy delete-account --project-ref oglzpevmqpcmryznqaiu --use-api
+```
+
+> 用 Management API 直接 POST `/v1/projects/{ref}/functions` 会 500（它要的是 CLI 打包后的 ESZIP），
+> 所以走 CLI；`--use-api` 表示不用 Docker。
+
+## 一次性部署（四步，首次照着做）
 
 ### 1. 建表
 

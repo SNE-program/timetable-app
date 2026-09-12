@@ -3722,7 +3722,20 @@ const today = todayISO();   // ← 真实的今天，而不是传入的 now
 2. **手搓一个能登录的 auth 用户很难**：GoTrue 读用户时会扫到一批列，缺一个就 500 `Database error querying schema`。
    所以行级安全改用「切角色 + `request.jwt.claims`」来测，不依赖 auth 服务，反而更接近 RLS 的真实判定条件。
 
-### 7. 还没做完的两件事
+### 7. 服务端上线（部署当天补记）
+
+| 项 | 状态 |
+| --- | --- |
+| Edge Function | `send-mail` / `delete-account` 已部署（CLI `functions deploy --use-api`，status=ACTIVE、verify_jwt=true）|
+| 函数密钥 | `RESEND_API_KEY`、`MAIL_FROM` 已写入 Secrets |
+| 认证邮件 | Auth SMTP → `smtp.resend.com:465`（用户 `resend`）；Site URL 与回调白名单已配 |
+| 发件域名 | 用已验证的 `wzmssf.club`；`timble.bond` 已建但缺 DNS |
+
+**真调用的验证**（不是本地 mock）：注册触发的确认邮件、以及 `send-mail` 发出的自检邮件，
+在 Resend 后台都显示 `delivered`；`delete-account` 之后账号 404、备份行与发信记录随级联删除。
+顺带测到了错误翻译：域名未验证时，`send-mail` 返回的是「发件域名还没在 Resend 里验证通过」，而不是 Resend 的英文原文。
+
+### 8. 当时还没做完的两件事（后已补齐）
 
 - **Edge Function 尚未部署**：需要 Supabase CLI 或 access token，我手上没有。所以「发邮件」与「注销账号」两个按钮现在会报错；备份与恢复不受影响。
 - **发信域名**：Resend 要求发件域名过 DNS 验证，`sne-program.github.io` 不是域名。没有域名时它只能发给注册 Resend 用的那个邮箱，
