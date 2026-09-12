@@ -128,6 +128,10 @@ npm run sync:android   # 构建前端并同步到 android/
 npm run open:android   # 用 Android Studio 打开
 npm run apk            # 构建 release APK（需要 ANDROID_HOME / JAVA_HOME）
 npm run check:version  # 校验 package.json 与 build.gradle 版本一致
+
+# 网络到 github.com 不通、但 api.github.com 正常时，用 API 推送（见 docs/11）
+$env:GITHUB_TOKEN = 'ghp_...'
+node scripts/push-via-api.mjs
 ```
 
 ### 调试参数

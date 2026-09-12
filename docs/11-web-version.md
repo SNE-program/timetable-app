@@ -105,7 +105,35 @@ PWA（manifest + service worker）同样**刻意留到后面**：
 - 检查清单在网页版确实是 **3 项**（Android 是 8 项）；
 - 注入 `VITE_REPO_URL` 后网页版出现 3 个 Android 下载入口；不注入时 0 个。
 
-## 7. 还没做的
+## 7. 上线记录：网络上的一次绕行
+
+这台开发机所在网络对 `github.com:443` 是**连接重置**（页面打不开、`git push` 直接失败），
+而 `api.github.com` 正常。所以这一次的首次推送不是 `git push`，而是走 Git Data API：
+读本地 HEAD 的对象（`git cat-file`，**不读工作区**）→ 逐个上传 blob → 建 tree → 建 commit → 建分支。
+
+仓库里留了这条通道：
+
+```powershell
+$env:GITHUB_TOKEN = 'ghp_...'      # 只需 repo 权限；用完立刻撤销
+node scripts/push-via-api.mjs
+```
+
+关键在于它**校验 SHA**：每个 blob、tree、commit 的 SHA 都必须与本地相等，否则报错停下。
+两次推送（首次 + 后续文档提交）都报 `ALL MATCH` —— 远端与本地逐位一致，
+不存在「看起来推上去了、其实内容不同」这种情况。
+
+几个只有真的做过才会知道的坑，记在这里：
+
+| 坑 | 现象 | 处理 |
+| --- | --- | --- |
+| 完全空的仓库上 Git Data API 不可用 | `POST /git/blobs` 报 `409 Git Repository is empty` | 先用 Contents API 建一个不匹配工作流 `paths` 的占位文件，再用 force 把分支指到真正的根提交 |
+| 工作区与仓库内的行尾可能不同 | `android/gradlew.bat` 工作区是 CRLF、仓库里存 LF，直接上传工作区字节会让 tree SHA 对不上 | 一律从 git 对象库取字节；并在 `.gitattributes` 里给 `*.bat` 标 `eol=crlf` |
+| 对象可能已被打包 | 直接读 `.git/objects/xx/yyy` 会 `ENOENT`（`count-objects` 显示 `count: 0`） | 改用 `git cat-file --batch` |
+| PowerShell 写文本会带 BOM / 把数组拼成一行 | 提交信息开头多一个 `\uFEFF`；`mode` 变成 `\uFEFF100644` 被接口 422 拒掉 | 用 `[System.IO.File]::WriteAllText` + `UTF8Encoding($false)`，数组显式 `-join [char]10` |
+| 用 API 建 ref / 改 ref 不触发 `push` 事件 | 推完 `runs=0`，网页版没有自动发布 | 手动 `workflow_dispatch` 跑一次（本次就是这么发的） |
+| 发布资源名不能有非 ASCII | `课表助手-v1.4.0.apk` 被 GitHub 改成 `-v1.4.0.apk` | 附件改名 `timetable-app-v1.4.0.apk`，并把 README / CHANGELOG 里的说明改成这个名字 |
+
+## 8. 还没做的
 
 - **IndexedDB 资产后端**：见第 5 节，配额是网页版最实际的痛点；
 - **PWA / 离线**：等版本节奏稳定；
