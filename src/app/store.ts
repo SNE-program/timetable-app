@@ -40,8 +40,14 @@ import {
 } from '../cloud/client';
 import { parseAuthLink } from '../cloud/link';
 import { buildBackupWithinLimit, describeBackup, formatTime, restoreAssets, validateBackup } from '../cloud/backup';
+import {
+  deleteMascot as deleteCloudMascot, fetchMascot, listMascots, myQuota, quotaLine, setMascotPublic,
+  uploadMascot, type CloudMascot, type MascotQuota,
+} from '../cloud/mascots';
 import { loadSession, saveSession, freshToken } from '../cloud/session';
 import { cloudConfigured, cloudHost } from '../cloud/config';
+import { emailRedirectUrl } from './meta';
+import { isNativePlatform } from '../platform/nativeBridge';
 import { APP_VERSION } from './version';
 
 export type TabKey = 'week' | 'today' | 'tasks' | 'studio' | 'settings';
@@ -1437,6 +1443,14 @@ export interface CloudState {
   passwordSheet: boolean;
   /** 从邮件链接回来时的类型：signup / recovery / … */
   linkType: string;
+  /** 右上角那个云入口打开的弹层 */
+  sheet: boolean;
+  /** 云端角色：自己的 + 别人公开的（按 user_id 区分） */
+  mascots: CloudMascot[];
+  mascotsLoaded: boolean;
+  mascotsBusy: boolean;
+  mascotsError: string;
+  quota: MascotQuota | null;
 }
 
 /**
@@ -1454,6 +1468,7 @@ export interface CloudState {
 function initialCloud(): CloudState {
   const base: CloudState = {
     session: loadSession(), busy: '', error: '', notice: '', backup: null, passwordSheet: false, linkType: '',
+    sheet: false, mascots: [], mascotsLoaded: false, mascotsBusy: false, mascotsError: '', quota: null,
   };
   let link = null;
   try { link = parseAuthLink(window.location.hash, window.location.search); } catch (e) { link = null; }
@@ -1555,8 +1570,12 @@ export async function cloudRecover(email: string): Promise<void> {
   if (!cloudConfigured()) return;
   setCloud({ busy: 'recover', error: '', notice: '' });
   try {
-    await sendRecover(email.trim(), window.location.origin + window.location.pathname);
-    setCloud({ busy: '', notice: '重置密码的邮件已发出，去 ' + email.trim() + ' 收件箱点链接即可设置新密码。' });
+    await sendRecover(email.trim(), emailRedirectUrl());
+    setCloud({
+      busy: '',
+      notice: '重置密码的邮件已发出，去 ' + email.trim() + ' 收件箱点链接即可设置新密码。'
+        + (isNativePlatform() ? '（手机上会打开浏览器完成，改完回应用里用新密码登录）' : ''),
+    });
     showToast('重置密码邮件已发出', 'ok');
   } catch (e) { cloudFail(e, '发送失败'); }
 }
@@ -1784,6 +1803,132 @@ export async function cloudSetPassword(password: string): Promise<boolean> {
     cloudFail(e, '设置密码失败');
     return false;
   }
+}
+
+
+/* ------------------------------ 云端角色 ------------------------------ */
+
+export function openCloudSheet(): void {
+  setCloud({ sheet: true, error: '', mascotsError: '' });
+  void cloudLoadMascots();
+}
+
+export function closeCloudSheet(): void {
+  setCloud({ sheet: false });
+}
+
+/**
+ * 拉一次角色列表。
+ *
+ * 没登录也能拉：公开的角色对所有人可见（"把设计公开给别人用"就是这个意思），
+ * 所以这里传的是"当前令牌（可能为空）"。
+ */
+export async function cloudLoadMascots(): Promise<void> {
+  if (!cloudConfigured()) return;
+  setCloud({ mascotsBusy: true, mascotsError: '' });
+  try {
+    let token: string | null = null;
+    if (state.cloud.session) {
+      try { token = await cloudToken(); } catch (e) { token = null; }
+    }
+    const list = await listMascots(token);
+    const q = token ? await myQuota(token).catch(function () { return null; }) : null;
+    setCloud({ mascots: list, mascotsLoaded: true, mascotsBusy: false, quota: q || state.cloud.quota });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    setCloud({ mascotsBusy: false, mascotsLoaded: true, mascotsError: msg });
+  }
+}
+
+/** 把本机当前的角色传到云端 */
+export async function cloudUploadMascot(name: string, isPublic: boolean): Promise<boolean> {
+  const s = state.cloud.session;
+  if (!cloudConfigured() || !s) { setCloud({ mascotsError: '先登录再上传角色' }); return false; }
+  const pack = state.mascot;
+  if (!pack) { setCloud({ mascotsError: '本机还没有角色：先在外观 → 角色里做一个或导入一个' }); return false; }
+  /* 客户端先提醒一次配额 —— 真正的判定在数据库触发器里，那边才是安全边界 */
+  const q = state.cloud.quota;
+  if (q && !q.unlimited && q.used >= q.limit) {
+    setCloud({ mascotsError: '云端角色已经 ' + q.used + ' / ' + q.limit + '：先在列表里删掉一个再传' });
+    return false;
+  }
+  setCloud({ mascotsBusy: true, mascotsError: '' });
+  try {
+    const token = await cloudToken();
+    const row = await uploadMascot(token, s.user.id, pack, name || pack.name || '未命名角色', isPublic);
+    await cloudLoadMascots();
+    setCloud({ mascotsBusy: false });
+    showToast('已上传到云端：' + row.name + (isPublic ? '（已公开）' : ''), 'ok');
+    return true;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    setCloud({ mascotsBusy: false, mascotsError: msg });
+    showToast(msg, 'error');
+    return false;
+  }
+}
+
+/** 用云端的某个角色替换本机当前角色（含素材） */
+export async function cloudUseMascot(m: CloudMascot): Promise<void> {
+  if (!cloudConfigured()) return;
+  setCloud({ mascotsBusy: true, mascotsError: '' });
+  try {
+    let token: string | null = null;
+    if (state.cloud.session) { try { token = await cloudToken(); } catch (e) { token = null; } }
+    const r = await fetchMascot(token, m.path);
+    if (!r.ok || !r.pack) {
+      throw new Error(r.errors.join('；') || '这个角色包读不出来');
+    }
+    const applied = importMascotPack(JSON.stringify(r.pack), m.name);
+    if (!applied.ok) throw new Error(applied.error || '这个角色包用不了');
+    setCloud({ mascotsBusy: false, sheet: false });
+    showToast('已用上「' + m.name + '」' + (applied.warnings.length ? '（' + applied.warnings.length + ' 条提示）' : ''), 'ok');
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    setCloud({ mascotsBusy: false, mascotsError: msg });
+    showToast(msg, 'error');
+  }
+}
+
+export async function cloudSetMascotPublic(m: CloudMascot, isPublic: boolean): Promise<void> {
+  const s = state.cloud.session;
+  if (!cloudConfigured() || !s) return;
+  try {
+    const token = await cloudToken();
+    await setMascotPublic(token, m.id, isPublic);
+    setCloud({
+      mascots: state.cloud.mascots.map(function (x) { return x.id === m.id ? Object.assign({}, x, { is_public: isPublic }) : x; }),
+    });
+    showToast(isPublic ? '已公开，别人可以在「公开角色」里看到并使用' : '已取消公开', 'ok');
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    setCloud({ mascotsError: msg });
+    showToast(msg, 'error');
+  }
+}
+
+export async function cloudDeleteMascot(m: CloudMascot): Promise<void> {
+  const s = state.cloud.session;
+  if (!cloudConfigured() || !s) return;
+  const ok = await confirmDanger('删除云端的「' + m.name + '」？删掉之后这个角色在云端就没有了（本机正在用的那个不受影响）。', '删除');
+  if (!ok) return;
+  setCloud({ mascotsBusy: true, mascotsError: '' });
+  try {
+    const token = await cloudToken();
+    await deleteCloudMascot(token, m);
+    setCloud({ mascots: state.cloud.mascots.filter(function (x) { return x.id !== m.id; }), mascotsBusy: false });
+    void cloudLoadMascots();
+    showToast('已从云端删除', 'ok');
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    setCloud({ mascotsBusy: false, mascotsError: msg });
+    showToast(msg, 'error');
+  }
+}
+
+/** 界面用：配额那一行字 */
+export function cloudQuotaLine(): string {
+  return quotaLine(state.cloud.quota);
 }
 
 /** 设备名只用来在备份信息里区分来源，不参与恢复逻辑 */

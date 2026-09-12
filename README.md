@@ -134,6 +134,27 @@ TypeScript + React + Vite，Android 由 Capacitor 打包。
 **刻意不用纯媒体查询**：Android 壳里的平板横屏同样会超过 1024px，那种情况要保留手机版式，
 所以判断条件里带了「不是原生壳」，见 `useWideLayout()`。手机端一行样式都没改。
 
+## 自定义域名（timble.bond）
+
+网页版默认在 `https://sne-program.github.io/timetable-app/`。换成自己的域名只要三步，`public/CNAME` 已经写好了：
+
+1. **DNS**（在域名商那边给 `timble.bond` 加四条 A 记录）：
+
+   | 类型 | 主机 | 值 |
+   | --- | --- | --- |
+   | A | `@` | `185.199.108.153` |
+   | A | `@` | `185.199.109.153` |
+   | A | `@` | `185.199.110.153` |
+   | A | `@` | `185.199.111.153` |
+
+   （想带 www 的话再加一条 CNAME：`www` → `sne-program.github.io`）
+
+2. **仓库** Settings → Pages → Custom domain 填 `timble.bond`，勾上 Enforce HTTPS；
+3. **Supabase** 的 Site URL 与回调白名单已经同时包含两个域名，邮件链接从哪个入口进来都能跳回正确的地方。
+
+> ⚠️ **顺序不能反**：Pages 一旦设了自定义域名，旧的 `sne-program.github.io` 地址会 302 过去。
+> DNS 还没生效就设置，等于把分享出去的链接全体打不开。所以先解析、后设置。
+
 ## 下载页
 
 地址：**<https://sne-program.github.io/timetable-app/download/>** —— 由 `public/download/index.html` 直接提供，
@@ -152,6 +173,9 @@ TypeScript + React + Vite，Android 由 Capacitor 打包。
 | 设置页 | 不出现「云备份」面板 | 出现：立即备份 / 从云端恢复 / 把本周课表发到邮箱 / 删除 |
 | 网络 | 一个请求都不发 | 只有点按钮才发 |
 
+- **入口在右上角的云图标**（与设置 / 搜索 / 添加并排），设置页里也有同一份面板 —— 备份是动作，不该先去设置里找；
+- **云端角色**：自己做的角色可以传到云端，换设备登录后一点就能用；可以**公开**给同学（公开的谁都能用，没登录也能看）；
+  每个账号最多 2 个（额度不设限的账号除外，限制写在数据库触发器里）；素材走 Storage，元信息走表；
 - 服务端在 `supabase/`：建表脚本（两张表都开 RLS，策略只允许 `auth.uid() = user_id`）、
   两个 Edge Function（注销账号、用 Resend 发信）。部署步骤见 `supabase/README.md`。
 - 客户端在 `src/cloud/`：**没有引入 SDK**，直接调 Supabase 的 HTTP 接口（项目仍然只有 React 与 Capacitor 两个运行时依赖）。

@@ -1,3 +1,5 @@
+import { isNativePlatform } from '../platform/nativeBridge';
+
 declare const __REPO_URL__: string;
 
 /**
@@ -20,6 +22,24 @@ export const ANDROID_RELEASE_URL = REPO_URL ? REPO_URL + '/releases/latest' : ''
  * 所以任何构建里都存在，不会出现死链 —— 和 ANDROID_RELEASE_URL 那种"必须配置了仓库地址才有"的不一样。
  */
 export const DOWNLOAD_PAGE = './download/';
+
+/**
+ * 邮件里那些链接应该跳回的站点。
+ *
+ * 网页版就用当前地址（本地调试、自定义域名都对）；**安卓版必须用这个固定地址** ——
+ * 应用内的页面地址是 https://localhost/，邮件客户端打不开它，
+ * Supabase 的回调白名单里也不该出现它。
+ */
+export const PUBLIC_SITE_URL = 'https://timble.bond/';
+
+export function emailRedirectUrl(): string {
+  try {
+    if (isNativePlatform()) return PUBLIC_SITE_URL;
+    return window.location.origin + window.location.pathname;
+  } catch (e) {
+    return PUBLIC_SITE_URL;
+  }
+}
 
 /** 稳定下载地址：永远指向最新一版（发布时同时上传这个名字的附件） */
 export const ANDROID_LATEST_APK = REPO_URL ? REPO_URL + '/releases/latest/download/timetable-app.apk' : '';

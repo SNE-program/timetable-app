@@ -2,9 +2,10 @@ import React from 'react';
 import {
   closeSheets, dismissToast, importMascotPack, importMascotSheet, importThemeFromFile, jumpToDate, openAdd, openCourse,
   openMascotEditor, openSearch, openTask, patchMascotPrefs, patchPrefs, patchWallpaper, redo, removeMascot,
-  cloudFillProfile, resolveConfirm, setNotify, setNotifyStatus, setSystemDark, setTab, setWeek, showToast,
-  takeMigrateNotes, undo, useApp,
+  cloudFillProfile, openCloudSheet, resolveConfirm, setNotify, setNotifyStatus, setSystemDark, setTab, setWeek,
+  showToast, takeMigrateNotes, undo, useApp,
 } from './store';
+import { cloudConfigured } from '../cloud/config';
 import { ConfirmDialog } from '../ui/common';
 import Welcome from '../ui/Welcome';
 import ShareCodeSheet from '../ui/ShareCodeSheet';
@@ -17,6 +18,7 @@ import MascotEditor from '../ui/MascotEditor';
 import { isVideoFile, videoToSpriteSheet } from '../theme/videoSheet';
 import ChangelogSheet from '../ui/ChangelogSheet';
 import PasswordSheet from '../ui/PasswordSheet';
+import CloudSheet from '../ui/CloudSheet';
 import { onNotified, syncReminders } from './reminderRuntime';
 import { watchSystemTimeChanges } from './rescheduleWatch';
 import { consumePendingOpen } from '../platform/widget';
@@ -394,6 +396,30 @@ export default function App() {
                 {s.history.redo > 0 ? (
                   <button className="icon-btn" title="重做" onClick={function () { redo(); }}>↷</button>
                 ) : null}
+                {/*
+                  云备份入口：与设置、搜索、添加并排放在右上角。
+                  它是"动作"而不是"配置" —— 埋在设置页里等于要用户先想到去设置。
+                  没配置 Supabase 的构建里这盏灯不出现（cloudConfigured 为假）。
+                */}
+                {cloudConfigured() ? (
+                  <button
+                    className="icon-btn" title="云备份与云端角色"
+                    aria-label="云备份与云端角色"
+                    onClick={openCloudSheet}
+                    style={{ position: 'relative' }}
+                  >
+                    <Icon name="cloud" size={18} />
+                    {s.cloud.session ? (
+                      <span
+                        aria-hidden="true"
+                        style={{
+                          position: 'absolute', right: 3, top: 3, width: 6, height: 6, borderRadius: '50%',
+                          background: 'var(--c-accent)',
+                        }}
+                      />
+                    ) : null}
+                  </button>
+                ) : null}
                 {tab !== 'settings' ? (
                   <button className="icon-btn" title="设置" onClick={function () { setTab('settings'); }}><Icon name="settings" size={18} /></button>
                 ) : null}
@@ -512,6 +538,7 @@ export default function App() {
       {s.mascotEditor ? <MascotEditor mode={s.mascotEditor} key={s.mascotEditor} /> : null}
       {/* 设置新密码：从邮件里的「重置密码」链接回来时自动打开，也可以从云备份面板进 */}
       {s.cloud.passwordSheet ? <PasswordSheet /> : null}
+      {s.cloud.sheet ? <CloudSheet /> : null}
       {s.manualSheet ? <ManualView /> : null}
       {s.changelogSheet ? <ChangelogSheet /> : null}
 

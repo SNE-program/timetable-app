@@ -20,7 +20,8 @@ import React from 'react';
 
 export type IconName =
   | 'calendar' | 'sun' | 'tasks' | 'palette' | 'settings' | 'search'
-  | 'lock' | 'ban' | 'archive' | 'bell' | 'clipboard' | 'leaf' | 'check' | 'target';
+  | 'lock' | 'ban' | 'archive' | 'bell' | 'clipboard' | 'leaf' | 'check' | 'target'
+  | 'cloud' | 'globe';
 
 /** 只存路径数据，画布与描边属性统一由 Icon 施加，保证粗细一致 */
 const PATHS: Record<IconName, string[]> = {
@@ -75,6 +76,14 @@ const PATHS: Record<IconName, string[]> = {
     'M4 21c1-5 4-8 8-10',
   ],
   check: ['M20 6L9 17l-5-5'],
+  cloud: [
+    'M17.5 19a4.5 4.5 0 0 0 .5-8.97A6 6 0 0 0 6.3 11.2 3.9 3.9 0 0 0 7 19h10.5z',
+  ],
+  globe: [
+    'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z',
+    'M3.6 9h16.8M3.6 15h16.8',
+    'M12 3c2.5 2.6 3.6 5.6 3.6 9S14.5 18.4 12 21c-2.5-2.6-3.6-5.6-3.6-9S9.5 5.6 12 3z',
+  ],
 };
 
 export function Icon(props: {

@@ -8,6 +8,79 @@
 
 ---
 
+## v1.7.0
+
+云备份搬到右上角 · 角色也能上云了
+
+四件事：入口、云端角色、公开画廊、安卓侧确认。
+
+**① 入口从设置页搬到右上角**
+
+课表备份、恢复、云端角色整块进了一个弹层，入口是顶栏那个云图标（与设置 / 搜索 / 添加并排）。
+理由：备份是**动作**，设置是**配置** —— 埋进设置等于要用户先想到`这事在设置里`。
+登录后图标右下角有一个小圆点。没配置 Supabase 的构建里这盏灯不出现。
+
+内容与设置页里的面板**是同一个组件**（`CloudPanel`），只是多了一个入口 —— 两份界面各自维护，迟早出现`设置里能点、这里点不动`。
+
+**② 云端角色：素材走对象存储，元信息走表**
+
+角色包是一坨 JSON（一张图就上 MB），而 PostgREST 单次请求约 1 MB —— 塞进行里必然失败（课表备份那边已经因为这个丢过图片）。所以：
+
+| 放哪 | 放什么 |
+| --- | --- |
+| `public.mascots` 表 | 名字、是否公开、大小、对象路径 |
+| Storage 的 `mascots` 桶（私有）| 角色包本身，路径第一段必须是自己的 `user_id` |
+
+桶是私有的，读权限由策略判定：**自己的 + 公开的**；写只在 `user_id` 目录里。
+没登录的人也能读公开角色（这正是`公开给别人用`的另一半：只给登录用户看等于没公开）。
+
+**③ 配额写在数据库里**
+
+每人 2 个，额度不设限的账号除外。判定是一个 `before insert` 触发器，
+不设限的标记放在 `public.profiles` 里并且 **revoke 掉客户端的写权限** —— 额度是服务端说了算的东西，
+客户端那行`已用 2 / 2`只是提前提醒，不是安全边界。
+
+**④ 上传前必须还原素材（一个容易漏的坑）**
+
+本机存角色时，大图会被抽进资产库、包里只留 `asset:<key>` 引用。直接把这个包传上去，
+别人下载到的就是**一堆空图** —— 而本机看起来完全正常，这类 bug 极难被发现。
+所以上传前先 `hydrateMascot` 还原成自包含的包，**并且在还原之前先数一遍 key 是否都在本机**：
+找不到就当场拒绝上传并说明原因，而不是传一个空白角色上去。
+
+上传是两步（Storage + 表），**第二步失败会把第一步的文件删掉** —— 否则空间被占着、列表里却没有，用户删无可删。这两条都有单测钉着。
+
+**⑤ 安卓侧确认**
+
+安卓版的页面来源是 `https://localhost`，所以专门验了 CORS：
+REST、Storage、Auth 三个端点带 `Origin: https://localhost` 请求，返回的都是 `Access-Control-Allow-Origin: *` ✓。
+另外把邮件链接的回跳地址改成固定站点（`emailRedirectUrl()`）—— 安卓里 `window.location` 是 `https://localhost/`，
+邮件客户端打不开它，回调白名单里也不该出现它。
+
+**⑥ 自定义域名（准备工作已做完）**
+
+`public/CNAME` 已写入 `timble.bond`；Supabase 的 Site URL 与回调白名单已同时包含 `https://timble.bond/` 与旧的 github.io 地址。
+还差的只有 DNS：在域名商那边给 `timble.bond` 加四条 A 记录（GitHub Pages 的固定 IP），
+然后在仓库 Settings → Pages 里把 Custom domain 填成 `timble.bond` 并勾上 Enforce HTTPS。
+**这一步不能提前做**：Pages 一旦设了自定义域名，旧地址会 302 过去，而 DNS 没生效时旧地址就打不开了。
+
+**⑦ 验证**
+
+| 项 | 结果 |
+| --- | --- |
+| 单元测试 | **510 通过 / 28 文件**（新增 11 条：素材还原、缺素材拒绝、两步上传与失败清理、体积上限、公开角色免登录取回）|
+| 类型检查 | `tsc --noEmit` 0 错误 |
+| 真项目建表 | `profiles`（RLS 1 条策略、无写权限）、`mascots`（RLS 4 条策略）、`mascots` 桶与 4 条对象策略；你的账号已标为不设限 |
+| CORS | REST / Storage / Auth 三个端点对 `https://localhost` 都返回 `Access-Control-Allow-Origin: *` |
+
+**⑧ 交付**
+
+| 项目 | 结果 |
+| --- | --- |
+| 版本 | versionCode **55** / versionName **1.7.0** |
+| 新增文件 | `src/cloud/mascots.ts`（+test）、`src/ui/MascotCloudSection.tsx`、`src/ui/CloudSheet.tsx`、`supabase/schema-mascots.sql`、`public/CNAME` |
+| Android | `课表助手-v1.7.0.apk` · 9.22 MB · SHA-256 `0798E18957D446F403F5BE14FF3A8D85BFDC36C573830ABD09B148768AD5A4FA` · Defender `found no threats` · 与前几版同一张证书 |
+
+---
 ## v1.6.2
 
 邮件链接：换台新设备也接得住

@@ -92,18 +92,30 @@ function friendly(raw: string, status: number, code: string): string {
 interface RawError { message?: string; error_description?: string; msg?: string; error?: string; error_code?: string; code?: string }
 
 /** 统一的请求出口：超时、错误翻译、JSON 解析都在这里做一次 */
-async function request(
-  method: string, path: string, opts: { token?: string; body?: unknown; prefer?: string; timeoutMs?: number } = {}
-): Promise<unknown> {
+export interface RequestOptions {
+  token?: string;
+  /** JSON 对象：会被序列化 */
+  body?: unknown;
+  /** 原样发送的字符串正文（Storage 上传要用：请求体就是文件本身，不能再套一层 JSON） */
+  rawBody?: string;
+  contentType?: string;
+  prefer?: string;
+  /** 额外的请求头，例如 Storage 的 x-upsert */
+  headers?: Record<string, string>;
+  timeoutMs?: number;
+}
+
+async function request(method: string, path: string, opts: RequestOptions = {}): Promise<unknown> {
   if (!cloudConfigured()) throw new CloudError('这个版本没有配置云备份', 0, 'not_configured');
   const url = supabaseUrl() + path;
   const headers: Record<string, string> = {
     apikey: supabaseKey(),
-    'Content-Type': 'application/json',
+    'Content-Type': opts.contentType || 'application/json',
   };
   const bearer = opts.token || supabaseKey();
   headers.Authorization = 'Bearer ' + bearer;
   if (opts.prefer) headers.Prefer = opts.prefer;
+  if (opts.headers) for (const k in opts.headers) headers[k] = opts.headers[k];
 
   const ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
   const timer = ctl ? setTimeout(function () { ctl.abort(); }, opts.timeoutMs || 20000) : null;
@@ -112,7 +124,9 @@ async function request(
     res = await fetch(url, {
       method: method,
       headers: headers,
-      body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+      body: opts.rawBody !== undefined
+        ? opts.rawBody
+        : (opts.body === undefined ? undefined : JSON.stringify(opts.body)),
       signal: ctl ? ctl.signal : undefined,
     });
   } catch (e) {
@@ -149,6 +163,17 @@ function toSession(json: unknown): CloudSession {
     expiresAt: Date.now() + Math.max(60, expiresIn - 60) * 1000,
     user: { id: String(user.id || ''), email: String(user.email || '') },
   };
+}
+
+/**
+ * 给同一套请求逻辑开一个出口。
+ *
+ * 角色云端那部分（src/cloud/mascots.ts）要用它访问 Storage 与多张表，
+ * 但**错误翻译、超时、重试语义必须只有一份** —— 否则同一个 401 在两个模块里
+ * 会说两句不同的话，用户看到的就是"这个 app 说法不一致"。
+ */
+export async function cloudRequest(method: string, path: string, opts: RequestOptions = {}): Promise<unknown> {
+  return request(method, path, opts);
 }
 
 /** 注册。项目开了邮箱确认时，返回的 session 为空 —— 调用方要如实提示"去邮箱确认" */
