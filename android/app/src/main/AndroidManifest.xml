@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme">
+
+        <activity
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
+            android:name=".MainActivity"
+            android:label="@string/title_activity_main"
+            android:theme="@style/AppTheme.NoActionBarLaunch"
+            android:launchMode="singleTask"
+            android:exported="true">
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+        </activity>
+
+        <!--
+          桌面小组件。
+          updatePeriodMillis 在 widget info 里设为 0：数据完全由应用推送刷新，
+          不靠系统定时唤醒 —— 倒计时用 Chronometer 在桌面自己走，不需要我们每分钟更。
+
+          android:exported="false"：只有系统桌面能通过 AppWidget 机制唤起它，
+          不需要对外暴露。 （APPWIDGET_UPDATE 由系统广播，非 exported 也能收到）
+        -->
+        <receiver
+            android:name=".widget.TimetableWidgetProvider"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_timetable_info" />
+        </receiver>
+
+        <receiver
+            android:name=".widget.NextClassWidgetProvider"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_next_info" />
+        </receiver>
+
+        <!--
+          系统时间 / 时区变化、应用更新：只记一个"待重排"标记，真正的重排在
+          应用回到前台时由 JS 完成（时间引擎只有一份）。
+          开机重排由 LocalNotifications 插件自带的 RestoreReceiver 负责。
+        -->
+        <receiver
+            android:name=".SystemChangeReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths"></meta-data>
+        </provider>
+    </application>
+
+    <!-- Permissions -->
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- 通知：Android 13+ 需要运行时申请 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!--
+      精确闹钟。两条一起声明以覆盖所有版本：
+        USE_EXACT_ALARM      —— Android 13+ 安装即自动授予（限闹钟 / 日历类应用，课表正是这一类）
+        SCHEDULE_EXACT_ALARM —— Android 12 默认授予；Android 14+ 默认拒绝，但有上面那条就够了
+      只声明 SCHEDULE_EXACT_ALARM 的话，在 vivo 这类 Android 14+ 机器上默认是被拒的。
+    -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!--
+      说明：这里刻意不声明 REQUEST_IGNORE_BATTERY_OPTIMIZATIONS。
+      该权限属于「可能有害应用」类别，是安全软件的高频误报点。
+      需要时改为在应用内引导用户手动把本应用加入电池白名单。
+    -->
+    <!-- 重启后自动重排未来的提醒 -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+</manifest>

@@ -1,0 +1,817 @@
+/**
+ * 布局检查。加 ?diag=1 打开。
+ *
+ * 无头浏览器在 Windows 上有最小窗口宽度限制（约 504px），靠 --window-size 测不了窄屏；
+ * 而只约束容器宽度又骗不过媒体查询（媒体查询看的是真实视口）。
+ * 所以这里用 iframe：iframe 的视口就是它的尺寸，媒体查询会正确生效。
+ *
+ * 用法：?diag=1            在当前视口测
+ *       ?diag=1&w=360,390  在 360 / 390 宽的 iframe 里分别测
+ */
+import { getState } from './store';
+import { renderTimetableImage } from '../ui/timetableImage';
+import { platformName } from '../platform/nativeBridge';
+
+/**
+ * 角色行为检查（?behavecheck=秒数）。
+ *
+ * 回答的问题："它到底是不是一直在做同一个动作？"
+ *
+ * 做法：每 200ms 读一次 `.mascot-inner` 上的 data-behavior / data-reaction，
+ * 记录**状态切换**（不是逐次采样），最后报出：做过哪几种动作、各占几次、
+ * 最长的一次动作持续了多久、这段时间里反应了几次，以及切换序列本身。
+ *
+ * 为什么要专门做这个：动作的"随机感"是主观的，但"30 秒里只有一种动作"是客观的 ——
+ * 上一版就是两条固定周期的正弦，看三秒就知道它在循环。
+ */
+function runBehaviorCheck(seconds: number): void {
+  /** 与 Mascot.tsx 里的 EDGE 保持一致：锚点必须留在距边缘这么多像素以内 */
+  const EDGE_MARGIN = 6;
+  const started = Date.now();
+  const seq: string[] = [];
+  const counts: Record<string, number> = {};
+  let last = '';
+  let lastChangeAt = started;
+  let longestRun = 0;
+  let reactions = 0;
+  let lastReaction = '';
+  let samples = 0;
+  const reactionKinds: string[] = [];
+  /* 走动是否越界：直接量角色的包围盒（它包含走动的位移） */
+  let minLeft = Infinity;
+  let maxRight = -Infinity;
+  /** 锚点（底部中心）的活动范围 —— 走动是否越界看的是它，不是整个身体 */
+  let minAnchor = Infinity;
+  let maxAnchor = -Infinity;
+  let walkSamples = 0;
+  /** 走动时实际用的是哪张素材（data-state）—— "走路与休息有没有区分开"就看它 */
+  const walkStates: Record<string, boolean> = {};
+  /** 走动时有没有在跑"迈步"动作（没有 walk 素材时才应该有） */
+  let gaitSamples = 0;
+  /** 走动时镜像（翻面）与未镜像的采样数 —— 用来验证"朝左走时翻面" */
+  let mirrorSamples = 0;
+  let normalSamples = 0;
+
+  const tick = window.setInterval(function () {
+    const el = document.querySelector('.mascot-inner') as HTMLElement | null;
+    if (!el) return;
+    const host = el.closest('.mascot') as HTMLElement | null;
+    samples++;
+    const b = el.getAttribute('data-behavior') || '?';
+    const rx = el.getAttribute('data-reaction') || '';
+    if (b !== last) {
+      if (last !== '') {
+        const run = Date.now() - lastChangeAt;
+        if (run > longestRun) longestRun = run;
+      }
+      last = b;
+      lastChangeAt = Date.now();
+      seq.push(b);
+      counts[b] = (counts[b] || 0) + 1;
+    }
+    if (rx && rx !== lastReaction) {
+      reactions++;
+      lastReaction = rx;
+      reactionKinds.push(rx);
+    }
+    if (!rx) lastReaction = '';
+    if (b === 'walk') {
+      walkSamples++;
+      walkStates[(host && host.getAttribute('data-state')) || '?'] = true;
+      if (el.getAttribute('data-gait') === '1') gaitSamples++;
+      /*
+       * 镜像：走动往左时角色应当翻面。
+       * 计算出来的 transform 是个矩阵，第一个分量是 -1 就说明翻过来了 ——
+       * 这是判断"有没有真的镜像"最直接的办法（几何尺寸看不出来）。
+       */
+      const m = window.getComputedStyle(host || el).transform;
+      if (m && m.indexOf('matrix') === 0) {
+        const a = parseFloat(m.slice(m.indexOf('(') + 1));
+        if (a < 0) mirrorSamples++; else normalSamples++;
+      }
+    }
+    const box = document.querySelector('.mascot');
+    if (box) {
+      const r = box.getBoundingClientRect();
+      if (r.width > 0) {
+        if (r.left < minLeft) minLeft = r.left;
+        if (r.right > maxRight) maxRight = r.right;
+        const ax = r.left + r.width / 2;
+        if (ax < minAnchor) minAnchor = ax;
+        if (ax > maxAnchor) maxAnchor = ax;
+      }
+    }
+  }, 200);
+
+  window.setTimeout(function () {
+    window.clearInterval(tick);
+    const finalRun = Date.now() - lastChangeAt;
+    if (finalRun > longestRun) longestRun = finalRun;
+    const kinds = Object.keys(counts);
+    const dur = Math.round((Date.now() - started) / 100) / 10;
+    const text = 'BEHAVE ' + dur + 's 采样' + samples + '次 动作种类=' + kinds.length
+      + ' 切换' + Math.max(0, seq.length - 1) + '次 最长同动作=' + (longestRun / 1000).toFixed(1) + 's'
+      + ' 反应=' + reactions + '次' + (reactionKinds.length ? '[ ' + reactionKinds.join(' ') + ' ]' : '')
+      + ' | 分布: ' + kinds.map(function (k) { return k + '×' + counts[k]; }).join(' ')
+      + ' | 序列: ' + seq.join(' → ')
+      + ' | ' + (isFinite(minLeft)
+        ? (function () {
+          /*
+           * 判据是**锚点**（底部中心），不是整个身体。
+           *
+           * 身体允许挂在屏幕外 —— 那是 v0.15.5 明确要的（"允许移出边界，
+           * 只要中心点在边界里即可"）。会出问题的是锚点跑出可用区域，
+           * 那才是"拖不回来 / 走到屏幕外"。所以这里量锚点的活动范围。
+           */
+          const vw = window.innerWidth;
+          return '锚点 x∈[' + Math.round(minAnchor) + ',' + Math.round(maxAnchor) + ']'
+            + ' 可用区[' + EDGE_MARGIN + ',' + (vw - EDGE_MARGIN) + ']'
+            + ' 锚点越界=' + (minAnchor < EDGE_MARGIN - 1 || maxAnchor > vw - EDGE_MARGIN + 1 ? '是(!!)' : '否')
+            + ' 本体 x∈[' + Math.round(minLeft) + ',' + Math.round(maxRight) + ']（可挂屏幕外）'
+            + ' 走动采样' + walkSamples + '/' + samples
+            + (walkSamples > 0
+              ? ' 走动时素材=' + Object.keys(walkStates).join('/') + ' 迈步动作采样' + gaitSamples
+                + ' 翻面' + mirrorSamples + '/正常' + normalSamples
+              : '');
+        })()
+        : '没量到角色盒');
+
+    const pre = document.createElement('pre');
+    pre.id = 'behavecheck';
+    pre.style.cssText = 'position:fixed;left:0;top:0;z-index:99999;font:10px monospace;white-space:pre-wrap;'
+      + 'background:#000;color:#0f0;margin:0;padding:4px;max-width:100%;';
+    pre.textContent = text;
+    document.body.appendChild(pre);
+
+    let send = function (_t: string): void { /* 默认不回传 */ };
+    try { send = makeReporter(new URLSearchParams(window.location.search).get('report') || ''); } catch (e) { /* 忽略 */ }
+    send(text);
+  }, Math.max(4000, seconds * 1000));
+}
+
+/**
+ * 逐帧播放检查（?framecheck=1）。
+ *
+ * 它回答一个**只能靠时间采样回答**的问题：角色播放时，有没有走到网格里
+ * 那些全透明的空格子上？走到的每一次，用户看到的就是"角色闪了一下"。
+ *
+ * 做法：每 40ms 读一次精灵元素的 background-position（计算值已经是 px），
+ * 按元素自身宽高折回格号，再和"真实帧数"比。判据很硬：
+ *
+ *   BAD > 0            → 播到了空格子（会闪）—— ?mascot=5 就是这个状态
+ *   BAD = 0 且采样到多格 → 正常循环          —— ?mascot=4 就是这个状态
+ *
+ * ## 结果怎么读回来
+ *
+ * 无头浏览器里拿不到页面内部状态（这台机器上 --dump-dom 不吐东西），所以结果
+ * 被画成**能按像素读的色块**：上面一块大的判定色（绿=过、红=不过、蓝=没测到），
+ * 下面一条 320×20 的采样条，每一段代表一次采样（绿=合法帧、红=空格子）。
+ * 外部脚本只要数红色像素，就知道有没有闪、闪了多少次。
+ * 色块位置是写死的：box 内边距 2，判定块 320×40，条子再往下 2 —— 于是
+ * 判定色在 (162,22)，采样条在 y=54、x=2..322。
+ */
+/**
+ * 检查结果的回传通道（只在带 ?report=端口 时启用）。
+ *
+ * 为什么需要它：无头浏览器里"页面内部状态"拿不出来 —— 这台机器上 --dump-dom
+ * 不吐东西，截图又只能靠像素猜。所以在检查里留一个**只写不读**的出口：
+ * 把结果当成 query 发给本机一个临时 HTTP 服务，那边打印出来。
+ * 不带 report 参数时一行都不会发，产物里也永远不会联网（这条底线不能破）。
+ */
+function makeReporter(port: string): (text: string) => void {
+  const n = Number(port);
+  if (!isFinite(n) || n <= 0) return function () { /* 没配端口就什么都不做 */ };
+  const url = 'http://127.0.0.1:' + Math.round(n) + '/r?m=';
+  /*
+   * 用一张 1×1 的图片当信标，而不是 fetch。
+   *
+   * 图片请求不受 CORS 约束、也不会被 no-cors 的规则吃掉 —— 只要服务在监听就一定收得到。
+   * 这条通道只在带 ?report= 时启用（默认什么都不发），产物里不会联网。
+   */
+  return function (text: string): void {
+    try {
+      const img = new Image();
+      img.src = url + encodeURIComponent(text) + '&t=' + Date.now();
+    } catch (e) { /* 忽略 */ }
+  };
+}
+
+function runFrameCheck(): void {
+  const CAP = 80;
+  const samples: boolean[] = [];
+  /** 整圈里访问到过哪些格子 —— 集合比逐次采样稳，不会被采样节拍和帧节拍"打拍子"骗到 */
+  const visited: Record<number, boolean> = {};
+  let gridCols = 0;
+  let gridRows = 0;
+  let realFrames = 0;
+  /** 显示出来的格子 ≠ 当前帧号 的次数：位移算错时它会立刻变成非 0 */
+  let misaligned = 0;
+  let skipped = '';
+
+  const box = document.createElement('div');
+  box.id = 'framecheckbox';
+  box.style.cssText = 'position:fixed;left:0;top:0;z-index:99999;background:#000;padding:2px;';
+  const verdict = document.createElement('div');
+  verdict.style.cssText = 'width:320px;height:40px;background:#2962ff;';
+  const strip = document.createElement('div');
+  strip.style.cssText = 'display:flex;width:320px;height:20px;margin-top:2px;background:#222;';
+  const text = document.createElement('pre');
+  text.id = 'framecheck';
+  text.style.cssText = 'font:10px monospace;color:#0f0;margin:2px 0 0;white-space:pre-wrap;width:320px;';
+  text.textContent = 'FRAMECHECK 采样中…';
+  box.appendChild(verdict);
+  box.appendChild(strip);
+  box.appendChild(text);
+  document.body.appendChild(box);
+
+  let report = function (_text: string): void { /* 默认不回传 */ };
+  try {
+    report = makeReporter(new URLSearchParams(window.location.search).get('report') || '');
+  } catch (e) { /* 忽略 */ }
+
+  /* 心跳：每秒把"页面现在长什么样"回传一次，排查"到底是没渲染还是没采到" */
+  let beat = 0;
+  const hb = window.setInterval(function () {
+    beat++;
+    const rootEl = document.getElementById('root');
+    report('BEAT ' + beat + ' root=' + (rootEl ? rootEl.innerHTML.length : -1)
+      + ' mascot=' + !!document.querySelector('.mascot')
+      + ' sheet=' + !!document.querySelector('.mascot-sheet')
+      + ' tabs=' + document.querySelectorAll('.tab').length
+      + ' samples=' + samples.length);
+    if (beat >= 6) window.clearInterval(hb);
+  }, 1000);
+
+  const startedAt = Date.now();
+  /*
+   * 可选延迟：`?fcdelay=3000` 表示"等 3 秒再开始采样"。
+   * 用处很具体 —— 老角色包的自动修帧数是在启动后 1.5 秒跑的，
+   * 不把这段排除掉，采样里就会混进"修好之前"的帧，结论永远像没修好。
+   */
+  let delay = 0;
+  try {
+    const d = Number(new URLSearchParams(window.location.search).get('fcdelay') || 0);
+    if (isFinite(d) && d > 0) delay = Math.min(8000, Math.round(d));
+  } catch (e) { /* 忽略 */ }
+
+  const tick = window.setInterval(function () {
+    if (Date.now() - startedAt < delay) return;
+    if (samples.length >= CAP) { finish(); return; }
+    const host = document.querySelector('.mascot') as HTMLElement | null;
+    const wrapper = document.querySelector('.mascot-sheet') as HTMLElement | null;
+    const sheetImg = document.querySelector('.mascot-sheet-img') as HTMLElement | null;
+    if (!host || !wrapper || !sheetImg) {
+      if (Date.now() - startedAt > 5000) { skipped = '没找到逐帧图的容器（要用 ?mascot=2/4/5 才测得到）'; finish(); }
+      return;
+    }
+    const cols = Number(host.getAttribute('data-cols') || 0);
+    const rows = Number(host.getAttribute('data-rows') || 0);
+    const frames = Number(host.getAttribute('data-frames') || 0);
+    /*
+     * 从**真实几何**反推"现在露出的是哪一格"：
+     *   容器左上角 − 整图左上角 = 平移量 = col·cellW
+     * 这条路不依赖任何"我以为 CSS 会怎么算"的假设 —— 上一版就是栽在
+     * "以为 background-position: -100% 会往左推一格"上（实际把图推出了容器，
+     * 只剩第 0 帧能看见，于是角色一闪一闪）。现在改成直接量。
+     */
+    const wr = wrapper.getBoundingClientRect();
+    const ir = sheetImg.getBoundingClientRect();
+    if (!cols || !rows || !frames || !wr.width || !wr.height) return;
+    const col = Math.round((wr.left - ir.left) / wr.width);
+    const row = Math.round((wr.top - ir.top) / wr.height);
+    const cell = row * cols + col;
+    /* 显示的格子必须是"这一帧该显示的那一格"，否则就是位移算错了 */
+    const want = Number(wrapper.getAttribute('data-frame') || 0);
+    const aligned = cell === want;
+    const ok = aligned && cell >= 0 && cell < frames;
+    samples.push(ok);
+    if (!aligned) misaligned++;
+    gridCols = cols; gridRows = rows; realFrames = frames;
+    if (cell >= 0 && cell < cols * rows) visited[cell] = true;
+  }, 40);
+
+  function finish(): void {
+    window.clearInterval(tick);
+    window.clearInterval(hb);
+    const good = samples.filter(function (s) { return s; }).length;
+    const bad = samples.length - good;
+    const pass = !skipped && bad === 0 && misaligned === 0 && good > 1;
+
+    verdict.style.background = skipped ? '#2962ff' : (pass ? '#00c853' : '#d50000');
+    for (let i = 0; i < samples.length; i++) {
+      const seg = document.createElement('div');
+      seg.style.cssText = 'flex:1 1 0;background:' + (samples[i] ? '#00ff00' : '#ff0000') + ';';
+      strip.appendChild(seg);
+    }
+    text.textContent = 'FRAMECHECK ' + (delay ? '(延迟 ' + delay + 'ms) ' : '') + (skipped ? 'SKIP ' + skipped
+      : (misaligned > 0 ? 'FAIL 显示出来的格子与帧号对不上 ' + misaligned + ' 次（位移算错了）'
+        : (pass ? 'PASS' : 'FAIL 播到了 ' + bad + ' 次空格子（会闪）')))
+      + '\n  采样 ' + samples.length + ' 次  合法 ' + good + '  空白 ' + bad + '  位移错 ' + misaligned
+      + '\n  判定色=' + (skipped ? 'blue' : (pass ? 'green' : 'red')) + '（绿=修好了 / 红=还在闪）';
+    document.body.appendChild(box);
+
+    /*
+     * 走到的格子集合 → "这一圈里有多少格是空的"。
+     * 这个数比逐次采样稳得多：采样节拍和帧节拍很容易锁相，
+     * 逐次计数会低估空白比例（实测只抓到 3/80，而真实空白占比是 7/16）。
+     */
+    const cellList = Object.keys(visited).map(Number).sort(function (a, b) { return a - b; });
+    const blankVisited = cellList.filter(function (c) { return c >= realFrames; }).length;
+    const blankShare = cellList.length ? Math.round(100 * blankVisited / cellList.length) : 0;
+
+    /* 把结论连同"页面到底有没有渲染出来"一起回传，免得只看一条结论误判 */
+    const host = document.querySelector('.mascot') as HTMLElement | null;
+    const rootEl = document.getElementById('root');
+    report('FRAMECHECK verdict=' + (skipped ? 'SKIP' : (pass ? 'PASS' : 'FAIL')) + ' delay=' + delay
+      + ' samples=' + samples.length + ' good=' + good + ' bad=' + bad
+      + ' cols=' + (host ? host.getAttribute('data-cols') : '-')
+      + ' rows=' + (host ? host.getAttribute('data-rows') : '-')
+      + ' frames=' + (host ? host.getAttribute('data-frames') : '-')
+      + ' mascot=' + (host ? Math.round(host.getBoundingClientRect().width) + 'x' + Math.round(host.getBoundingClientRect().height) : 'none')
+      + ' root=' + (rootEl ? rootEl.innerHTML.length : -1)
+      + ' grid=' + (gridCols * gridRows) + ' visited=' + cellList.length
+      + ' blankVisited=' + blankVisited + ' blankShare=' + blankShare + '%'
+      + ' misaligned=' + misaligned
+      + ' note=' + (skipped || '-'));
+    if (!host) report('PAGE tabs=' + document.querySelectorAll('.tab').length
+      + ' topbar=' + !!document.querySelector('.topbar')
+      + ' privacyText=' + ((document.body.textContent || '').slice(0, 60)));
+    else report('MASCOTART sheet=' + !!document.querySelector('.mascot-sheet')
+      + ' img=' + !!document.querySelector('.mascot-img')
+      + ' opacity=' + window.getComputedStyle(host).opacity);
+  }
+}
+
+export function runDiagnostics(): void {
+  const params = new URLSearchParams(window.location.search);
+
+  if (params.get('framecheck') === '1') runFrameCheck();
+  if (params.get('behavecheck')) {
+    const sec = Number(params.get('behavecheck'));
+    runBehaviorCheck(isFinite(sec) && sec >= 5 ? Math.min(180, sec) : 30);
+  }
+
+  /* ?img=1 ：渲染课表图片并留在 DOM 里，供外部提取检查 */
+  if (params.get('img') === '1') {
+    setTimeout(function () {
+      void (async function () {
+        try {
+          const st = getState();
+          const days = st.theme.showDays || 7;
+          const canvas = renderTimetableImage(st.data, {
+            week: st.week, days: days, theme: st.theme, systemDark: st.systemDark,
+          });
+          const url = canvas.toDataURL('image/png');
+          const info = document.createElement('pre');
+          info.id = 'imginfo';
+          info.style.cssText = 'position:relative;z-index:99999;font:12px monospace;background:#000;color:#0f0;padding:4px;margin:0;';
+          info.textContent = 'IMAGE ' + canvas.width + 'x' + canvas.height + ' bytes=' + Math.round(url.length * 0.75) + ' urlLen=' + url.length;
+          document.body.appendChild(info);
+          const img = document.createElement('img');
+          img.id = 'imgout';
+          img.src = url;
+          img.style.cssText = 'max-width:100%;display:block;';
+          document.body.appendChild(img);
+        } catch (e) {
+          const info = document.createElement('pre');
+          info.id = 'imginfo';
+          info.textContent = 'IMAGE FAILED: ' + (e as Error).message;
+          document.body.appendChild(info);
+        }
+      })();
+    }, 1600);
+  }
+
+  const widths = (params.get('w') || '').split(',').map(function (s) { return Number(s.trim()); })
+    .filter(function (n) { return n > 0; });
+
+  function describe(el: HTMLElement): string {
+    const cls = (el.className && typeof el.className === 'string')
+      ? '.' + el.className.trim().split(/\s+/).slice(0, 2).join('.') : '';
+    return el.tagName.toLowerCase() + cls;
+  }
+
+  function measure(win: Window, label: string): string[] {
+    const doc = win.document;
+    const de = doc.documentElement;
+    const out: string[] = [];
+    const vw = de.clientWidth;
+    const vh = de.clientHeight;
+    out.push('=== ' + label + ' | viewport ' + vw + 'x' + vh + ' | hscroll ' + (de.scrollWidth - vw) + ' ===');
+
+    const isFixed = function (el: HTMLElement): boolean {
+      let n: HTMLElement | null = el;
+      while (n && n !== doc.body) {
+        if (win.getComputedStyle(n).position === 'fixed') return true;
+        n = n.parentElement;
+      }
+      return false;
+    };
+
+    const all = doc.querySelectorAll('body *');
+    const wide: string[] = [];
+    for (let i = 0; i < all.length; i++) {
+      const el = all[i] as HTMLElement;
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 && r.height === 0) continue;
+      if (isFixed(el)) continue;
+      if (el.closest('.week-strip') || el.closest('.preset-scroll') || el.closest('.tl') || el.closest('.wp-grid')) continue;
+      if (r.width > vw + 1 || r.right > vw + 1 || r.left < -1) {
+        wide.push(describe(el) + ' w=' + Math.round(r.width) + ' R=' + Math.round(r.right));
+      }
+    }
+    out.push('OVERFLOW ' + wide.length);
+    for (const w of wide.slice(0, 8)) out.push('  ! ' + w);
+
+    const small: string[] = [];
+    const clickable = doc.querySelectorAll('button, a, input, select, [role="button"]');
+    for (let i = 0; i < clickable.length; i++) {
+      const el = clickable[i] as HTMLElement;
+      const r = el.getBoundingClientRect();
+      const st = win.getComputedStyle(el);
+      if (st.display === 'none' || st.visibility === 'hidden') continue;
+      if (r.width === 0 && r.height === 0) continue;
+      if (el.getAttribute('type') === 'file') continue;
+      const grow = function (pseudo: string) {
+        const a = win.getComputedStyle(el, pseudo);
+        if (!a || a.content === 'none' || a.position !== 'absolute') return 0;
+        const vals = a.inset.split(' ');
+        const v = parseFloat(vals[0]);
+        return isNaN(v) || v >= 0 ? 0 : -v;
+      };
+      const g = Math.max(grow('::after'), grow('::before'));
+      const w = r.width + g * 2;
+      const h = r.height + g * 2;
+      /*
+       * 判定标准：**两个方向都小于 44** 才算过小。
+       *
+       * 早先是"任一方向小于 44 就报"，结果 37×134 的课程卡（面积五千多平方像素、
+       * 手指随便点）每次都被列进来十一二条 —— 真问题反而被淹掉。
+       * 这种假阳性我们在 WRAP 那条指标上吃过一次亏，这里一并改掉。
+       */
+      if (w < 44 && h < 44) small.push(describe(el) + ' ' + Math.round(r.width) + 'x' + Math.round(r.height) + (g ? ' tap=' + Math.round(w) + 'x' + Math.round(h) : ''));
+    }
+    out.push('SMALL_TAP ' + small.length);
+    for (const s of small.slice(0, 12)) out.push('  ! ' + s);
+
+    const tiny: string[] = [];
+    for (let i = 0; i < all.length; i++) {
+      const el = all[i] as HTMLElement;
+      if (!el.firstChild || el.firstChild.nodeType !== 3) continue;
+      const txt = (el.textContent || '').trim();
+      if (!txt) continue;
+      const st = win.getComputedStyle(el);
+      if (st.display === 'none' || st.visibility === 'hidden') continue;
+      const fs = parseFloat(st.fontSize);
+      if (fs < 11) tiny.push(describe(el) + ' ' + fs.toFixed(1) + 'px');
+    }
+    out.push('TINY_FONT ' + tiny.length + (tiny.length ? '  (' + tiny.slice(0, 4).join(', ') + ')' : ''));
+
+    const clipped: string[] = [];
+    for (let i = 0; i < all.length; i++) {
+      const el = all[i] as HTMLElement;
+      if (!el.firstChild || el.firstChild.nodeType !== 3) continue;
+      if (el.scrollWidth > el.clientWidth + 2 && el.clientWidth > 0) {
+        const st = win.getComputedStyle(el);
+        if (st.textOverflow === 'ellipsis' || st.overflow === 'hidden') clipped.push(describe(el));
+      }
+    }
+    out.push('CLIPPED ' + clipped.length);
+
+    /**
+     * 断行检测：本该一行放下的文字被挤成了两行。
+     *
+     * 判据是「元素高度 ÷ 行高」——单个文本节点、没有 <br>、不是 nowrap 的元素，
+     * 如果高度超过 1.5 倍行高，那就是换行了。
+     * 段落类（.lr-sub / .desc / p 等）本来就该换行，排除掉。
+     */
+    const ALLOW_WRAP = /(^|\s)(desc|lr-sub|note|hint|body|paragraph|msg|text-block)(\s|$)|^(P|LI|TD)$/;
+    /* 说明书/更新日志是**文档**，正文本来就该换行。不排除掉的话，
+       一次 320px 的检查会刷出七十多条"本该一行放下"的假阳性。 */
+    const PROSE = /(^|\s)(doc-p|doc-lead|doc-note|doc-a|doc-step-d|doc-q|log-text|log-title)(\s|$)/;
+    /**
+     * 断行检测：把元素整份克隆到一个 nowrap + max-content 的离屏容器里量一次，
+     * 得到"这一行字本需要多宽"，再跟它实际拿到的宽度比。
+     * 克隆法能连子元素（图标 + 文字）一起算，比只看单个文本节点准得多。
+     */
+    const wrapped: string[] = [];
+    for (let i = 0; i < all.length; i++) {
+      const el = all[i] as HTMLElement;
+      const txt = (el.textContent || '').trim();
+      if (txt.length < 2) continue;
+      const st = win.getComputedStyle(el);
+      if (st.display === 'none' || st.visibility === 'hidden') continue;
+      if (st.whiteSpace === 'nowrap' || st.whiteSpace === 'pre') continue;
+      if (el.tagName === 'PRE' || el.tagName === 'TEXTAREA' || el.tagName === 'INPUT' || el.tagName === 'SELECT') continue;
+      const cls = typeof el.className === 'string' ? el.className : '';
+      if (ALLOW_WRAP.test(cls) || ALLOW_WRAP.test(el.tagName) || PROSE.test(cls)) continue;
+      /* 子元素里还有块级文本的，留给它自己去报，避免重复 */
+      const hasBlockChild = Array.prototype.some.call(el.children, function (c: HTMLElement) {
+        const d = win.getComputedStyle(c).display;
+        return d === 'block' || d === 'flex' || d === 'grid';
+      });
+      if (hasBlockChild) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width <= 0) continue;
+
+      /**
+       * 克隆必须挂回**原来的父节点**，否则丢掉继承下来的字号 ——
+       * 挂到 body 下会按 14px 量，而 .tab 里的文字其实是 11px，
+       * 量出来全部偏大、整张表都是假阳性。
+       */
+      const holder = el.parentElement || doc.body;
+      const clone = el.cloneNode(true) as HTMLElement;
+      clone.style.position = 'absolute';
+      clone.style.left = '-9999px';
+      clone.style.top = '0';
+      clone.style.width = 'max-content';
+      clone.style.maxWidth = 'none';
+      clone.style.whiteSpace = 'nowrap';
+      clone.style.visibility = 'hidden';
+      clone.style.pointerEvents = 'none';
+      holder.appendChild(clone);
+      const need = clone.getBoundingClientRect().width;
+      clone.remove();
+
+      if (need <= r.width + 0.5) continue;
+      const inner = Math.max(1, r.width - (parseFloat(st.paddingLeft) + parseFloat(st.paddingRight)));
+      const lines = Math.max(2, Math.round(need / inner));
+      const parent = el.parentElement ? describe(el.parentElement) : '?';
+      wrapped.push(describe(el) + ' 需' + Math.round(need) + '>实' + Math.round(r.width) +
+        ' "' + txt.slice(0, 16) + '" ~' + lines + '行 父=' + parent + ' fs=' + st.fontSize);
+    }
+    out.push('WRAP ' + wrapped.length);
+    for (const w of wrapped.slice(0, 18)) out.push('  ~ ' + w);
+
+    /**
+     * 内容比容器高 = 已经撑破或裁切了，这是硬伤。
+     * 但要忽略"触控外扩"伪元素 —— 那些 inset 为负的 ::after 本来就会超出边框，
+     * 不排除掉的话，每一个外扩控件都会报一次假警。
+     */
+    const grows = function (el: HTMLElement): boolean {
+      for (const pseudo of ['::after', '::before']) {
+        const a = win.getComputedStyle(el, pseudo);
+        if (!a || a.content === 'none' || a.position !== 'absolute') continue;
+        const v = parseFloat(a.inset.split(' ')[0]);
+        if (!isNaN(v) && v < 0) return true;
+      }
+      return false;
+    };
+    const overY: string[] = [];
+    for (let i = 0; i < all.length; i++) {
+      const el = all[i] as HTMLElement;
+      if (el.scrollHeight <= el.clientHeight + 2 || el.clientHeight <= 0 || el.clientWidth <= 0) continue;
+      const st = win.getComputedStyle(el);
+      if (st.overflowY === 'auto' || st.overflowY === 'scroll') continue;
+      if (el.closest('.sheet-body') || el.closest('.week-scroll')) continue;
+      /* 逐帧图的裁剪容器：它**本来就该**把整张雪碧图裁成一格（overflow:hidden），
+         报它溢出是假阳性，而且会把真正的溢出淹掉 */
+      if (el.classList.contains('mascot-sheet')) continue;
+      /*
+       * 大号展示数字（今日页那块课时数）：`line-height: 1` 是这类字的常规写法，
+       * 而字体自身的墨迹盒（ascent + descent）比 1em 高 —— 实测 34px 的字要占 42px，
+       * 于是 scrollHeight 永远大于 clientHeight。但父元素有 14px 下内边距，
+       * 字**一点没被裁**。这是度量口径问题，不是布局问题。
+       */
+      if (el.closest('.hero-count')) continue;
+      if (grows(el)) continue;
+      /* 子元素里只要有一个带外扩，容器也会被算高 */
+      let hasGrowChild = false;
+      const kids = el.querySelectorAll('*');
+      for (let k = 0; k < kids.length; k++) {
+        if (grows(kids[k] as HTMLElement)) { hasGrowChild = true; break; }
+      }
+      if (hasGrowChild) continue;
+      overY.push(describe(el) + ' 内容高' + el.scrollHeight + '>框高' + el.clientHeight);
+    }
+    out.push('OVERFLOW_Y ' + overY.length);
+    for (const o of overY.slice(0, 10)) out.push('  ^ ' + o);
+
+    const metric = function (sel: string, label2: string) {
+      const el = doc.querySelector(sel) as HTMLElement | null;
+      if (!el) { out.push('M ' + label2 + '=none'); return; }
+      const r = el.getBoundingClientRect();
+      out.push('M ' + label2 + '=' + Math.round(r.width) + 'x' + Math.round(r.height));
+    };
+    metric('.axis', 'axis');
+    metric('.ev', 'card');
+    metric('.topbar', 'topbar');
+    metric('.tabbar', 'tabbar');
+    metric('.icon-btn', 'iconbtn');
+    metric('.week-pill', 'pill');
+    metric('.chip', 'chip');
+    metric('.btn.sm', 'btnsm');
+
+    /*
+     * 角色浮层：两条要守住的底线。
+     *   1. 它是 fixed 定位，本来就不该产生任何溢出 —— 一旦参与布局，窄屏必破；
+     *   2. 它默认不该盖住可点控件。盖住了也点得到（外层 pointer-events:none），
+     *      但视觉上挡着按钮仍然算问题，所以把遮挡数报出来。
+     */
+    const mascotEl = doc.querySelector('.mascot') as HTMLElement | null;
+    if (!mascotEl) {
+      out.push('MASCOT none');
+    } else {
+      const mr = mascotEl.getBoundingClientRect();
+      let covered = 0;
+      /* 角色处在穿透状态（外观页）时它谁也挡不住，几何重叠不算问题 */
+      const passive = win.getComputedStyle(mascotEl).pointerEvents === 'none';
+      if (!passive) {
+        const clickable2 = doc.querySelectorAll('button, a, input, select, [role="button"]');
+        for (let i = 0; i < clickable2.length; i++) {
+          const el = clickable2[i] as HTMLElement;
+          if (mascotEl.contains(el) || el.contains(mascotEl)) continue;
+          const r = el.getBoundingClientRect();
+          if (r.width <= 0 || r.height <= 0) continue;
+          const cx = r.left + r.width / 2;
+          const cy = r.top + r.height / 2;
+          if (cx >= mr.left && cx <= mr.right && cy >= mr.top && cy <= mr.bottom) covered++;
+        }
+      }
+      /*
+       * 除了几何遮挡，还要问一句"它是不是画在最上面"。
+       *
+       * 几何上不重叠、却依然看不见 —— 这正是类名撞车那次的症状：
+       * 一个 position:fixed 的元素盖住了角色，而角色自己的 rect 一切正常。
+       * 判法是临时的：把 pointer-events 打开问一次 elementFromPoint，
+       * 因为 elementFromPoint 会**跳过 pointer-events:none 的元素**，不问就等于没测。
+       */
+      let onTop = '?';
+      try {
+        const saved = mascotEl.style.pointerEvents;
+        mascotEl.style.pointerEvents = 'auto';
+        const hit = doc.elementFromPoint(mr.left + mr.width / 2, mr.top + mr.height / 2) as HTMLElement | null;
+        mascotEl.style.pointerEvents = saved;
+        onTop = hit && (hit === mascotEl || mascotEl.contains(hit)) ? 'yes' : ('no(' + (hit ? hit.className || hit.tagName : 'null') + ')');
+      } catch (e) {
+        onTop = 'error';
+      }
+
+      out.push('MASCOT ' + Math.round(mr.width) + 'x' + Math.round(mr.height) +
+        ' 位置' + Math.round(mr.left) + ',' + Math.round(mr.top) +
+        ' 素材=' + (mascotEl.getAttribute('data-kind') || '?') +
+        ' 相位=' + (mascotEl.getAttribute('data-phase') || '?') +
+        ' 顶层=' + onTop +
+        ' 遮挡可点控件=' + covered + (passive ? '（当前穿透）' : ''));
+    }
+
+    /*
+     * 外观锁定到底锁住了多少。
+     *
+     * 这一项是被真实 bug 逼出来的：锁定规则原来只列了 button / input / switch 这些选择器，
+     * 而「角色」面板的动作**几乎全是** `list-row tap` —— 于是外观锁着的时候
+     * 角色设置整块照样点得动（其中「移除角色」会顺手清掉素材）。
+     * 一个"锁了但没锁全"的机制是看不出来的，只能量：
+     * 数一遍"锁定时仍然能点的面板控件"，它必须是 0。
+     */
+    const lockedStudio = doc.querySelector('.studio.locked');
+    if (lockedStudio) {
+      const cand = lockedStudio.querySelectorAll(
+        '.panel button, .panel input, .panel select, .panel .list-row.tap, .panel [role="button"], .panel .switch, .panel .upload-zone'
+      );
+      const still: string[] = [];
+      for (let i = 0; i < cand.length; i++) {
+        const el = cand[i] as HTMLElement;
+        const st = win.getComputedStyle(el);
+        if (st.display === 'none' || st.visibility === 'hidden') continue;
+        if (st.pointerEvents !== 'none') still.push(describe(el) + '(' + st.pointerEvents + ')');
+      }
+      /*
+       * 解锁入口必须存在，而且必须能点 ——
+       * "锁住了但找不到解锁"比不锁更糟。顶部那条是吸顶的，滚到下面时看不见，
+       * 所以角色面板里还有一条自带解锁按钮的提示（.studio-lock.inline）。
+       */
+      const unlockBtns = lockedStudio.querySelectorAll('.studio-lock .btn');
+      let usable = 0;
+      for (let i = 0; i < unlockBtns.length; i++) {
+        if (win.getComputedStyle(unlockBtns[i] as HTMLElement).pointerEvents !== 'none') usable++;
+      }
+      out.push('LOCK 锁定时仍可点的面板控件=' + still.length + ' 解锁入口=' + unlockBtns.length + '(可用 ' + usable + ')');
+      for (const s of still.slice(0, 10)) out.push('  ! ' + s);
+    }
+
+    /*
+     * 写作标记有没有漏到界面上。
+     *
+     * 说明书和更新日志的正文是普通字符串，约定里允许用 `**` 标重点，由组件转成加粗；
+     * 只要有一处忘了走渲染，用户看到的就是一对裸星号 —— 这种细节光看代码看不出来
+     * （写的时候满屏都是 `**`），只能渲染完再扫一遍 DOM。
+     */
+    let stars = 0;
+    const starWhere: string[] = [];
+    try {
+      const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        const txt = node.nodeValue || '';
+        if (txt.indexOf('**') < 0) continue;
+        stars++;
+        const pe = node.parentElement;
+        starWhere.push((pe ? describe(pe) : '?') + ' "' + txt.trim().slice(0, 24) + '"');
+      }
+    } catch (e) { /* 拿不到就算了 */ }
+    out.push('MARKDOWN 未渲染的 ** 标记=' + stars);
+    for (const s of starWhere.slice(0, 5)) out.push('  ! ' + s);
+
+    /* 标签栏：格子数和实际项数对不上时，多出来的项会掉到第二行并被裁掉 */
+    const tabs = doc.querySelectorAll('.tab');
+    const tabbarEl = doc.querySelector('.tabbar') as HTMLElement | null;
+    if (tabbarEl && tabs.length > 0) {
+      const br = tabbarEl.getBoundingClientRect();
+      const parts: string[] = [];
+      for (let i = 0; i < tabs.length; i++) {
+        const r = (tabs[i] as HTMLElement).getBoundingClientRect();
+        const inside = r.top >= br.top - 1 && r.bottom <= br.bottom + 1 && r.width > 0;
+        parts.push('#' + (i + 1) + (inside ? '✓' : '✗出框') + Math.round(r.top) + '-' + Math.round(r.bottom));
+      }
+      out.push('TABBAR ' + tabs.length + '项 框' + Math.round(br.top) + '-' + Math.round(br.bottom) + '  ' + parts.join(' '));
+    }
+
+    const cs = win.getComputedStyle(de);
+    out.push('VARS axis=' + cs.getPropertyValue('--axis-w').trim() + ' pad=' + cs.getPropertyValue('--pad').trim() + ' row=' + cs.getPropertyValue('--row-h').trim());
+
+    /*
+     * 应用壳还在不在。
+     *
+     * React 在渲染期抛异常会**卸载整棵树**，界面上是一片白 —— 没有报错、没有按钮。
+     * 这类问题 tsc 和单测都抓不到（v0.13.0 那次 hook 数量不一致就是这么漏出去的），
+     * 所以检查里留一条硬信号：root 被清空就是崩了。
+     */
+    const rootEl = doc.getElementById('root');
+    const rootLen = rootEl ? rootEl.innerHTML.length : -1;
+    out.push('ROOT ' + (rootLen < 0 ? 'missing'
+      : (rootLen < 200 ? 'EMPTY(' + rootLen + ') 渲染崩了' : 'ok(' + rootLen + ')')));
+    out.push('PLATFORM ' + platformName());
+
+    /*
+     * ?text=选择器 —— 把匹配到的可见文字回传。
+     *
+     * 平台分支（Android / 网页版）是靠 isNativePlatform() 当场选的，静态检查看不出来
+     * 到底渲染了哪一支。文案检查又只能看真实渲染结果，所以在检查里留一个取文本的口子：
+     * 带上选择器就能读到这一屏上真正写的是什么，而不是猜。
+     */
+    const textSel = params.get('text');
+    if (textSel) {
+      try {
+        const nodes = doc.querySelectorAll(textSel);
+        out.push('TEXT ' + textSel + ' n=' + nodes.length);
+        for (let i = 0; i < Math.min(8, nodes.length); i++) {
+          const raw = (nodes[i].textContent || '').replace(/\s+/g, ' ').trim();
+          out.push('  #' + i + '[' + Math.round((nodes[i] as HTMLElement).getBoundingClientRect().height)
+            + 'px] ' + raw.slice(0, 460));
+        }
+      } catch (e) {
+        out.push('TEXT ' + textSel + ' 选择器无效: ' + (e as Error).message);
+      }
+    }
+    return out;
+  }
+
+  /** 把检查文本回传（仅 ?report= 时）。分块发，单条 URL 太长会被浏览器丢掉 */
+  function beaconLines(lines: string[]): void {
+    let send = function (_t: string): void { /* 默认不回传 */ };
+    try { send = makeReporter(params.get('report') || ''); } catch (e) { /* 忽略 */ }
+    const text = lines.join(' | ');
+    const CHUNK = 600;
+    const total = Math.ceil(text.length / CHUNK);
+    for (let i = 0; i < total; i++) {
+      send('DIAG ' + (i + 1) + '/' + total + ' ' + text.slice(i * CHUNK, (i + 1) * CHUNK));
+    }
+  }
+
+  function render(lines: string[]): void {
+    beaconLines(lines);
+    const pre = document.createElement('pre');
+    pre.id = 'diag';
+    pre.style.cssText = 'position:relative;z-index:99999;font:10px monospace;white-space:pre-wrap;background:#000;color:#0f0;margin:0;padding:4px;';
+    pre.textContent = lines.join('\n');
+    document.body.appendChild(pre);
+  }
+
+  if (widths.length === 0) {
+    setTimeout(function () { render(measure(window, 'current')); }, 1500);
+    return;
+  }
+
+  const results: string[] = [];
+  let idx = 0;
+  const base = window.location.pathname + window.location.search.replace(/[?&]diag=1/, '').replace(/[?&]w=[^&]*/, '');
+
+  function next(): void {
+    if (idx >= widths.length) { render(results); return; }
+    const w = widths[idx];
+    idx++;
+    const h = Math.round(w * 2.05);
+    const frame = document.createElement('iframe');
+    frame.style.cssText = 'position:absolute;left:-9999px;top:0;width:' + w + 'px;height:' + h + 'px;border:0;';
+    frame.src = base + (base.indexOf('?') >= 0 ? '&' : '?') + 'frame=1';
+    document.body.appendChild(frame);
+    setTimeout(function () {
+      try { results.push.apply(results, measure(frame.contentWindow as Window, w + 'px')); }
+      catch (e) { results.push('=== ' + w + 'px | 测量失败: ' + (e as Error).message + ' ==='); }
+      frame.remove();
+      next();
+    }, 2200);
+  }
+  next();
+}

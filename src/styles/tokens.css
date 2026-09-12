@@ -1,0 +1,120 @@
+/* ============================================================
+   Design Token 基座 —— 工业化方向
+   参考大厂设计语言：小圆角、1px 描边分层、弱阴影、紧凑栅格
+   主题引擎会把这些变量写到 :root（见 src/theme/tokens.ts）
+   ============================================================ */
+
+:root {
+  /* 尺度常量 */
+  --axis-w: 44px;
+  --row-h: 68px;
+  --tab-h: 54px;
+  --gap: 4px;
+  --pad: 14px;
+
+  /* 控件高度阶梯：所有可点控件只允许取这三个值，界面的横向节奏才立得住 */
+  --h-sm: 30px;
+  --h-md: 34px;
+  --h-lg: 40px;
+
+  /* 圆角：工业审美的核心 —— 卡片级别一律 2-4px，只有标签用全圆 */
+  --r-card: 4px;
+  --r-panel: 6px;
+  --r-btn: 4px;
+  --r-tag: 3px;
+  --r-pill: 999px;
+
+  /* 动效：更快、更干脆 */
+  --ease: cubic-bezier(.2, .8, .2, 1);
+  --dur: 140ms;
+  --dur-slow: 280ms;
+
+  /* 字体族 */
+  --font-system: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --font-serif: "Songti SC", "STSong", "SimSun", Georgia, "Times New Roman", serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  --font-rounded: "Yuanti SC", "Hiragino Maru Gothic ProN", "Microsoft YaHei", sans-serif;
+  --font: var(--font-system);
+
+  /* 字号阶梯（受 fontScale 缩放）：整体比之前小一档，信息密度更高 */
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-md: 13.5px;
+  --fs-lg: 16px;
+  --fs-xl: 20px;
+  --fs-2xl: 28px;
+
+  /* 以下由主题引擎覆盖 */
+  --c-bg: #F4F5F7;
+  --c-surface: #FFFFFF;
+  --c-surface-2: #F7F8FA;
+  --c-panel: #FFFFFF;
+  --c-text: #1D2129;
+  --c-text-muted: #86909C;
+  --c-border: #E5E6EB;
+  --c-border-strong: #C9CDD4;
+  --c-accent: #1677FF;
+  --c-on-accent: #FFFFFF;
+  --c-today: rgba(22, 119, 255, .06);
+  --c-danger: #F53F3F;
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, .04);
+  --shadow-float: 0 6px 20px rgba(0, 0, 0, .12);
+  --glass-blur: 0px;
+  --card-opacity: 1;
+  --panel-alpha: 1;
+
+  /* 壁纸层 */
+  --wp-image: none;
+  --wp-blur: 0px;
+  --wp-scrim: 0;
+
+  color-scheme: light;
+}
+/* ---------- 安全区（刘海屏 / 手势条）---------- */
+:root {
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+  /* 触控目标外扩半径，用来在保持视觉紧凑的同时把可点区域做到 44px */
+  --tap-grow: 6px;
+}
+
+/* 手机上禁掉双击缩放带来的 300ms 延迟与误触 */
+button, a, [role="button"], .chip, .tab, .week-pill { touch-action: manipulation; }
+
+/* 手机上顶栏与内容不做橡皮筋抖动 */
+html, body { overscroll-behavior: none; }
+
+/* ---------- 窄屏：把横向空间全部让给课表网格 ---------- */
+@media (max-width: 430px) {
+  :root {
+    /*
+     * 节次轴要放得下「08:30」。之前收到 34/30px，而 11px 下这五个字符本身
+     * 就要 25-30px，余量几乎是零 —— 安卓上中文字体略宽一点，时间就被挤成
+     * 「08:」+「30」两行了。这里给到 40/38，代价是每天少不到 1px 的卡片宽。
+     */
+    --axis-w: 40px;
+    --pad: 12px;
+  }
+}
+@media (max-width: 380px) {
+  :root {
+    --axis-w: 38px;
+    --pad: 10px;
+    --row-h: 64px;
+  }
+}
+
+/* ---------- 横屏矮屏：压缩行高与顶栏 ---------- */
+@media (orientation: landscape) and (max-height: 560px) {
+  :root {
+    --row-h: 54px;
+    --tab-h: 48px;
+  }
+}
+
+/* ---------- 大屏（平板 / 桌面）：内容居中，不要拉成一条 ---------- */
+@media (min-width: 700px) {
+  .app { max-width: 520px; margin: 0 auto; box-shadow: 0 0 0 1px var(--c-border); }
+}

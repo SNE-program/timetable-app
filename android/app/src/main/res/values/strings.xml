@@ -1,0 +1,9 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">课表助手</string>
+    <string name="title_activity_main">课表助手</string>
+    <string name="package_name">app.timetable.mobile</string>
+    <string name="custom_url_scheme">app.timetable.mobile</string>
+    <string name="widget_next_desc">下一节课与倒计时</string>
+    <string name="widget_timetable_desc">下一节课和今天剩下的课</string>
+</resources>

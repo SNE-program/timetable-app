@@ -1,0 +1,35 @@
+node_modules/
+.npm-cache/
+dist/
+*.local
+.DS_Store
+
+# 验证用临时产物
+.edge-profile/
+.edge-clean/
+.edge-shot/
+.edge-p0/
+.render.html
+shots/
+test.log
+build.log
+
+# 本机工具链与缓存（体积大，且人人可自建）
+.android-sdk/
+
+# 发布产物：APK 放 GitHub Releases，不进版本库（一个 9 MB，十几版就是上百 MB）
+*.apk
+*.aab
+
+# 个人的东西，不要跟着公开仓库出去
+时间表.txt
+
+# Android
+# 发布签名的私钥与密码绝不能进版本库
+android/keystore/
+android/keystore.properties
+android/app/build/
+android/build/
+android/.gradle/
+android/local.properties
+android/app/src/main/assets/public/

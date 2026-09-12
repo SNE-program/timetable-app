@@ -1,0 +1,149 @@
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+body {
+  font-family: var(--font);
+  font-size: var(--fs-md);
+  line-height: 1.5;
+  color: var(--c-text);
+  background: var(--c-bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overscroll-behavior: none;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+button { border: 0; background: none; cursor: pointer; padding: 0; }
+input, select { outline: none; }
+::-webkit-scrollbar { width: 0; height: 0; }
+
+/* 数字统一用等宽数位，表格感是大厂 UI 的基本功 */
+.num, .at, .tl-time, .wk-day .dd, .hero-count .num, .sv { font-variant-numeric: tabular-nums; }
+
+/* ---------- 应用外壳 ---------- */
+.app {
+  position: relative;
+  height: 100vh;      /* 老 WebView 兜底 */
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--c-bg);
+  transition: background-color var(--dur-slow) var(--ease), color var(--dur) var(--ease);
+}
+
+.wallpaper {
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  /* background-image 由 applyThemeToDom 直接写入元素，不走 CSS 变量 */
+  background-size: cover; background-position: center; background-repeat: no-repeat;
+  filter: blur(var(--wp-blur));
+  transform: scale(1.06);
+  transition: opacity var(--dur-slow) var(--ease), filter var(--dur) var(--ease);
+}
+.wallpaper-scrim {
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background: var(--c-bg);
+  opacity: var(--wp-scrim);
+  transition: opacity var(--dur) var(--ease), background-color var(--dur-slow) var(--ease);
+}
+.app-layer { position: relative; z-index: 1; display: flex; flex-direction: column; height: 100%; }
+
+/* ---------- 顶部栏 ---------- */
+.topbar {
+  flex: 0 0 auto;
+  padding: calc(var(--sat) + 10px) calc(var(--pad) + var(--sar)) 0 calc(var(--pad) + var(--sal));
+  border-bottom: 1px solid var(--c-border);
+  background: var(--c-panel);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+}
+.topbar-row { display: flex; align-items: center; gap: 10px; min-height: 40px; }
+/*
+ * 左侧标题块必须能被压缩：flex 项默认 min-width:auto，内容多宽就占多宽，
+ * 于是把右侧按钮组直接顶出屏幕（字号调到最大、320px 窄屏上实测溢出 52px）。
+ * 给了 min-width:0 之后标题按 ellipsis 截断，按钮组始终留在框内。
+ */
+.topbar-row > div:first-child { flex: 1 1 auto; min-width: 0; }
+.term-name { font-size: var(--fs-lg); font-weight: 700; letter-spacing: -.2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.term-sub { font-size: var(--fs-xs); color: var(--c-text-muted); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topbar-actions { margin-left: auto; display: flex; gap: 8px; flex: 0 0 auto; }
+
+/* 周次选择：方形标签，不是胶囊 */
+.week-strip {
+  display: flex; gap: 5px; overflow-x: auto;
+  padding: 8px 0 9px;
+  scrollbar-width: none; scroll-behavior: smooth;
+}
+.week-pill {
+  position: relative;
+  flex: 0 0 auto; min-width: 38px; height: var(--h-sm); padding: 0 10px;
+  white-space: nowrap;
+  border-radius: var(--r-tag);
+  font-size: var(--fs-sm); font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--c-text-muted);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease);
+  display: flex; align-items: center; justify-content: center; gap: 3px;
+}
+.week-pill:hover { border-color: var(--c-border-strong); color: var(--c-text); }
+.week-pill.active { background: var(--c-accent); color: var(--c-on-accent); border-color: var(--c-accent); font-weight: 700; }
+.week-pill.is-now::after { content: ""; width: 4px; height: 4px; border-radius: 50%; background: currentColor; opacity: .85; }
+
+/* ---------- 内容区 ---------- */
+.content { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; }
+.content-inner {
+  padding: 14px calc(var(--pad) + var(--sar)) calc(var(--tab-h) + var(--sab) + 26px) calc(var(--pad) + var(--sal));
+}
+.content-inner.flush { padding-left: 0; padding-right: 0; }
+
+/* ---------- 底部标签栏：顶部指示条，标准大厂做法 ---------- */
+.tabbar {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  height: calc(var(--tab-h) + var(--sab));
+  padding-bottom: var(--sab);
+  /* 列数跟着标签数量走 —— 写死 repeat(4, 1fr) 时，第 5 个标签会掉到第二行，
+     而标签栏高度是固定值，那一行正好落在屏幕外面（设置就一直点不到） */
+  display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; align-items: center;
+  background: var(--c-panel);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.5);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.5);
+  border-top: 1px solid var(--c-border);
+  z-index: 30;
+}
+.tab {
+  position: relative;
+  height: calc(var(--tab-h));
+  min-height: 44px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  padding: 0 2px;
+  font-size: var(--fs-xs); color: var(--c-text-muted);
+  white-space: nowrap;   /* 「本周」「今日」这种两字标签绝不允许断行 */
+  transition: color var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+.tab:active { transform: scale(.94); }
+.tab.active { color: var(--c-accent); font-weight: 600; }
+.tab.active::before {
+  content: ""; position: absolute; top: -1px; left: 50%; transform: translateX(-50%);
+  width: 20px; height: 2px; background: var(--c-accent);
+}
+/* 图标是内联 SVG，颜色跟随标签前景色（选中时自动变成主题色） */
+.tab-icon { display: block; }
+
+/* ---------- 工具类 ---------- */
+.row { display: flex; align-items: center; gap: 8px; }
+.col { display: flex; flex-direction: column; }
+.spacer { flex: 1 1 auto; }
+.muted { color: var(--c-text-muted); }
+.tiny { font-size: var(--fs-xs); }
+.small { font-size: var(--fs-sm); }
+.bold { font-weight: 700; }
+.ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.section-title {
+  display: flex; align-items: center; gap: 6px;
+  font-size: var(--fs-sm); font-weight: 700; color: var(--c-text);
+  margin: 20px 0 8px; padding-left: 8px;
+  position: relative;
+  white-space: nowrap;
+}
+.section-title::before { content: ""; position: absolute; left: 0; top: 3px; bottom: 3px; width: 2px; background: var(--c-accent); }
+.card-block { background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--r-panel); overflow: hidden; }

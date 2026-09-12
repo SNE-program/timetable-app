@@ -1,0 +1,75 @@
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import App from './app/App';
+import './styles/tokens.css';
+import './styles/base.css';
+import './styles/components.css';
+import './styles/views.css';
+
+import { runDiagnostics } from './app/diagnostics';
+import { initStorage } from './storage';
+import {
+  hydrateAssetsIntoState, hydrateMascotIntoState, hydrateStorageIntoState, migrateInlineAssets,
+  repairMascotFrames,
+} from './app/store';
+import ErrorBoundary from './ui/ErrorBoundary';
+
+/*
+ * 几个检查入口都从这里进：布局（?diag=1）、逐帧播放（?framecheck=1）、
+ * 角色行为（?behavecheck=秒数）。
+ * **每个参数都要显式放行** —— 曾经只认 diag=1，于是 ?framecheck=1 静默地什么都没跑，
+ * 而在无头浏览器里"什么都没跑"和"跑了但没问题"看起来一模一样。
+ */
+if (typeof window !== 'undefined'
+  && (window.location.search.indexOf('diag=1') >= 0
+    || window.location.search.indexOf('framecheck=1') >= 0
+    || window.location.search.indexOf('behavecheck') >= 0)) {
+  runDiagnostics();
+}
+
+/**
+ * 启动顺序：先读资产库，再挂载。
+ *
+ * 读资产是异步的（SQLite），但**结构化课表数据仍然是同步读的** ——
+ * 所以首屏不会等它：store 在模块求值时就已经拿到课表，这里只是把壁纸
+ * 和课程配图补上，补完触发一次重渲染。
+ *
+ * initStorage 失败不会抛：它会降级到 localStorage，应用照常起来。
+ */
+void (async function boot() {
+  try {
+    await initStorage();
+    /* 先补课表数据，再还原图片引用 —— 反过来的话图片会挂在旧的那份数据上 */
+    hydrateStorageIntoState();
+    hydrateAssetsIntoState();
+    /* 角色素材也在资产库里，和主题同一时机还原 */
+    hydrateMascotIntoState();
+    /* 老用户升级上来时，把已经有的大图从 localStorage 搬进资产库，把配额还回去 */
+    const moved = migrateInlineAssets();
+    if (moved > 0) console.info('已把 ' + moved + ' 张图片移入资产库，释放本地存储配额');
+  } catch (e) {
+    /* 资产库出问题不该拦住应用启动 */
+    console.warn('资产库初始化失败：', e);
+  }
+
+  /*
+   * 老角色包补一次真实帧数。
+   *
+   * 放在首屏渲染之后、而且延迟 1.5 秒：它要解码一张逐帧图再数格子，
+   * 早跑会和首屏抢解码器。`repairMascotFrames` 自己会判断"要不要改"，
+   * 没得改（新包、静态图、量不到）就原地返回，不会写任何东西。
+   */
+  window.setTimeout(function () { void repairMascotFrames(); }, 1500);
+
+  const el = document.getElementById('root');
+  if (el) {
+    createRoot(el).render(
+      <React.StrictMode>
+        {/* 顶层围栏：任何一处渲染异常都表现为一张能读的错误卡片，而不是白屏 */}
+        <ErrorBoundary label="课表助手" full={true}>
+          <App />
+        </ErrorBoundary>
+      </React.StrictMode>
+    );
+  }
+})();

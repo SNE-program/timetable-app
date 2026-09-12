@@ -1,0 +1,22 @@
+# 行尾统一成 LF。
+#
+# 仓库在 Windows 上开发，源码本身是 LF；不声明的话 git 会在检出时换成 CRLF，
+# 于是每次改一行都可能显示整文件变动。二进制与发布产物不做任何转换。
+* text=auto eol=lf
+
+# Windows 批处理按 CRLF 检出。
+# 仓库里照常存 LF，但 cmd.exe 解析"只有 LF 的 .bat"时在 goto/标签上会出错，
+# 所以 gradlew.bat 这类文件必须在工作区保持 CRLF。
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.gif binary
+*.ico binary
+*.apk binary
+*.aab binary
+*.jks binary
+*.keystore binary

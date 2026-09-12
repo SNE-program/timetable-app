@@ -1,0 +1,218 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  4×2：下一节课 + 今天剩下的课。
+
+  三行课程是**写死在布局里的**，代码只切换可见性与文字 —— 不用
+  RemoteViews.addView。原因有两个：
+    1. addView 在部分桌面实现上会被拒绝，一旦抛异常整次 onUpdate 就废掉，
+       小组件会停在 initialLayout 上什么都不显示（4×2 全白就是这个原因）；
+    2. addView 每次都要重新 inflate，比直接 setTextViewText 慢。
+
+  注意每行的子控件 id 必须独立。用 <include> 复用会让三行共用同一批 id，
+  RemoteViews 按 id 查找时永远只命中第一行，三行会显示同样的内容。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_bg"
+    android:padding="12dp">
+
+    <TextView
+        android:id="@+id/widget_term"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:singleLine="true"
+        android:ellipsize="end"
+        android:textSize="10sp"
+        android:textColor="#8A8F98"
+        android:text="课表助手" />
+
+    <LinearLayout
+        android:id="@+id/widget_next_row"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingTop="4dp"
+        android:paddingBottom="6dp">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/widget_next_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="#1D2129" />
+
+            <TextView
+                android:id="@+id/widget_next_where"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:textSize="11sp"
+                android:textColor="#8A8F98" />
+        </LinearLayout>
+
+        <Chronometer
+            android:id="@+id/widget_next_count"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:textColor="#1677FF" />
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#1A000000" />
+
+    <LinearLayout
+        android:id="@+id/widget_r1_box"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingTop="2dp"
+        android:paddingBottom="2dp">
+
+        <TextView
+            android:id="@+id/widget_r1_time"
+            android:layout_width="42dp"
+            android:layout_height="wrap_content"
+            android:singleLine="true"
+            android:textSize="11sp"
+            android:textColor="#1677FF"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/widget_r1_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:textSize="12sp"
+            android:textColor="#1D2129" />
+
+        <TextView
+            android:id="@+id/widget_r1_where"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:maxWidth="92dp"
+            android:textSize="11sp"
+            android:textColor="#8A8F98" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/widget_r2_box"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingTop="2dp"
+        android:paddingBottom="2dp">
+
+        <TextView
+            android:id="@+id/widget_r2_time"
+            android:layout_width="42dp"
+            android:layout_height="wrap_content"
+            android:singleLine="true"
+            android:textSize="11sp"
+            android:textColor="#1677FF"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/widget_r2_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:textSize="12sp"
+            android:textColor="#1D2129" />
+
+        <TextView
+            android:id="@+id/widget_r2_where"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:maxWidth="92dp"
+            android:textSize="11sp"
+            android:textColor="#8A8F98" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/widget_r3_box"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingTop="2dp"
+        android:paddingBottom="2dp">
+
+        <TextView
+            android:id="@+id/widget_r3_time"
+            android:layout_width="42dp"
+            android:layout_height="wrap_content"
+            android:singleLine="true"
+            android:textSize="11sp"
+            android:textColor="#1677FF"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/widget_r3_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:textSize="12sp"
+            android:textColor="#1D2129" />
+
+        <TextView
+            android:id="@+id/widget_r3_where"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:maxWidth="92dp"
+            android:textSize="11sp"
+            android:textColor="#8A8F98" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/widget_hint"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingTop="6dp"
+        android:textSize="11sp"
+        android:textColor="#8A8F98"
+        android:text="打开应用同步一次" />
+
+    <TextView
+        android:id="@+id/widget_more"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="10sp"
+        android:textColor="#8A8F98"
+        android:visibility="gone" />
+</LinearLayout>
