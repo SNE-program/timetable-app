@@ -64,7 +64,7 @@
 
 - 单测 **657 通过 / 39 个文件**（新增 `playback.test.ts` 12 个、`animLoop.test.ts` 10 个）；`tsc --noEmit` 0 错误
 - 无头浏览器实测：三种素材形态（静态图 / 逐帧图 / 动图）的反应都能完整播完，见上表
-- 版本：**1.9.12 / versionCode 73**
+- 版本：**1.9.12 / versionCode 73**；APK **9,717,403 字节**，SHA-256 `194930DF3AEE089EDFE7E5B1A9FB82D4592599E6230AE6011CD0C2884F374620`（Supabase 与 GitHub 两份逐字节一致）；CI 全绿
 
 ---
 
