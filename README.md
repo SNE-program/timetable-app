@@ -251,4 +251,5 @@ docs/          工程笔记（见下表）
 | [09 手机端适配与功能](docs/09-mobile-and-features.md) | 逐版的技术记录（append-only） |
 | [11 网页版](docs/11-web-version.md) | 网页版的能力边界、发布流程、存储限制与后续路线 |
 | [12 角色包规范](docs/12-mascot-spec.md) | 角色包的文件格式、字段表、校验与降级、运行时行为约定 |
+| [13 云端数据与管理台](docs/13-cloud-admin.md) | 网上到底存了什么、三种查看方式、`scripts/admin.mjs` 的用法与安全设计 |
 | [CHANGELOG](CHANGELOG.md) | 逐版本的完整改动记录（应用内「更新日志」是它的用户版） |
