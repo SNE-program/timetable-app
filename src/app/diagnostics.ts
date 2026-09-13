@@ -8,7 +8,10 @@
  * 用法：?diag=1            在当前视口测
  *       ?diag=1&w=360,390  在 360 / 390 宽的 iframe 里分别测
  */
-import { getState, storeEmitCount } from './store';
+import {
+  getState, historyEntries, openHistory, openOverride, patchTheme, storeEmitCount, toggleTask, undoTo, upsertOverride,
+} from './store';
+import { todayISO } from '../core/engine';
 import { renderCounts } from './renderCount';
 import { UPCOMING_MAX, buildWidgetPayload, widgetBoundaryMs } from '../platform/widget';
 import { renderTimetableImage } from '../ui/timetableImage';
@@ -496,6 +499,106 @@ function runWidgetCheck(): void {
   send(text);
 }
 
+/**
+ * 操作历史面板的自检（?histcheck=3）。
+ *
+ * 为什么需要：面板里列的是"栈里已经有的改动"，空栈时它只有一句"还没有可撤销的改动"，
+ * 行排版（标签 + 时间 + 右侧动作）根本量不到。所以这里用**公开的 store 动作**真做几笔可撤销的改动
+ * （改主色、改字号、勾一个任务），再打开面板，把行数、最宽的行、有没有溢出量出来。
+ *
+ * 顺带核对一件事：面板正文里不许出现没渲染的 `**` 标记 —— 这一版的说明文字里有加粗，
+ * 而普通 JSX 文本不会当 Markdown 渲染，写错了就是屏幕上两个星号。
+ */
+function runHistoryCheck(count: number): void {
+  const n = isFinite(count) && count > 0 ? Math.min(8, Math.round(count)) : 3;
+  let send = function (_text: string): void { /* 默认不回传 */ };
+  try { send = makeReporter(new URLSearchParams(window.location.search).get('report') || ''); } catch (e) { /* 忽略 */ }
+
+  setTimeout(function () {
+    for (let i = 0; i < n; i++) {
+      if (i % 3 === 0) patchTheme({ accent: i === 0 ? '#4C8DFF' : '#FF7D00' }, false, 'theme:accent');
+      /* 只动颜色，不动字号与间距 —— 免得自检自己把排版改掉，量出来的就不是产品本来的样子 */
+      else if (i % 3 === 1) patchTheme({ colorBlind: i > 1 }, false, 'theme:cb');
+      else {
+        const tasks = getState().data.tasks;
+        if (tasks.length > 0) toggleTask(tasks[0].id);
+      }
+    }
+    openHistory();
+    setTimeout(function () {
+      const st = getState();
+      const body = document.querySelector('.sheet-body');
+      const rows = body ? body.querySelectorAll('.list-row') : [];
+      let maxRight = 0;
+      let widest = '';
+      for (let i = 0; i < rows.length; i++) {
+        const el = rows[i] as HTMLElement;
+        const r = el.getBoundingClientRect();
+        if (r.right > maxRight) { maxRight = r.right; widest = (el.textContent || '').slice(0, 20); }
+      }
+      const text = body ? (body.textContent || '') : '';
+      send('HISTCHECK w=' + window.innerWidth
+        + ' sheet=' + (body ? 'yes' : 'no')
+        + ' rows=' + rows.length
+        + ' 历史 undo=' + st.history.undo + ' redo=' + st.history.redo
+        + ' 最宽行右边缘=' + Math.round(maxRight) + '/' + window.innerWidth
+        + ' 溢出=' + (maxRight > window.innerWidth + 1 ? 'YES' : 'no')
+        + ' 未渲染的星号=' + (text.indexOf('**') >= 0 ? 'YES' : 'no')
+        + ' 最宽行="' + widest + '"');
+      /* 顺手验一次"退回某一步"：撤销两笔，看栈深有没有真的减少 */
+      const before = st.history.undo;
+      const list = historyEntries(3);
+      const back = list.length > 1 ? undoTo(list[list.length - 1].id) : 0;
+      send('HISTCHECK undoTo 撤销了=' + back + ' 步，栈 ' + before + ' -> ' + getState().history.undo
+        + '，重做可选=' + getState().history.redo);
+    }, 700);
+  }, 1200);
+}
+
+/**
+ * 「调整某一次课」面板 + 恢复按钮的自检（?ovcheck=1）。
+ *
+ * 这一版把"已调整的 N 次"挪到了面板最上面、按钮改成「恢复」。这两件事都只能用真数据量：
+ * 先按公开接口做一次停课，再打开面板，量标题与按钮的尺寸，然后**真的点一下「恢复」**，
+ * 看数据里那条调整是否消失、历史栈是否多了一笔可撤销的记录。
+ */
+function runOverrideCheck(): void {
+  let send = function (_text: string): void { /* 默认不回传 */ };
+  try { send = makeReporter(new URLSearchParams(window.location.search).get('report') || ''); } catch (e) { /* 忽略 */ }
+  setTimeout(function () {
+    const st = getState();
+    const s0 = st.data.sessions[0];
+    if (!s0) { send('OVCHECK 没有课，跳过'); return; }
+    const before = st.data.overrides.length;
+    upsertOverride({ sessionId: s0.id, date: todayISO(), action: 'cancel', reason: '自检' });
+    openOverride(s0.id);
+    setTimeout(function () {
+      const body = document.querySelector('.sheet-body');
+      if (!body) { send('OVCHECK 面板没打开'); return; }
+      const title = body.querySelector('.section-title');
+      const buttons = body.querySelectorAll('button');
+      let restore: HTMLButtonElement | null = null;
+      for (let i = 0; i < buttons.length; i++) {
+        if ((buttons[i].textContent || '').trim() === '恢复') restore = buttons[i] as HTMLButtonElement;
+      }
+      const r = restore ? restore.getBoundingClientRect() : null;
+      const undoBefore = getState().history.undo;
+      send('OVCHECK w=' + window.innerWidth
+        + ' 首行标题="' + (title ? (title.textContent || '').slice(0, 20) : '无') + '"'
+        + ' 恢复按钮=' + (r ? Math.round(r.width) + 'x' + Math.round(r.height) : '没有')
+        + ' 调整条目=' + body.querySelectorAll('.list-row').length
+        + ' 点击前 overrides=' + getState().data.overrides.length + '/' + before);
+      if (restore) restore.click();
+      setTimeout(function () {
+        const now = getState();
+        send('OVCHECK 点「恢复」之后 overrides=' + now.data.overrides.length
+          + '，历史 ' + undoBefore + ' -> ' + now.history.undo
+          + '（多了一笔=' + (now.history.undo > undoBefore ? 'yes' : 'no') + '）');
+      }, 500);
+    }, 800);
+  }, 1200);
+}
+
 export function runDiagnostics(): void {
   const params = new URLSearchParams(window.location.search);
 
@@ -505,6 +608,8 @@ export function runDiagnostics(): void {
     runPerfCheck(isFinite(sec) && sec >= 3 ? Math.min(120, sec) : 10);
   }
   if (params.get('framecheck') === '1') runFrameCheck();
+  if (params.get('histcheck')) runHistoryCheck(Number(params.get('histcheck')));
+  if (params.get('ovcheck') === '1') runOverrideCheck();
   if (params.get('behavecheck')) {
     const sec = Number(params.get('behavecheck'));
     runBehaviorCheck(isFinite(sec) && sec >= 5 ? Math.min(180, sec) : 30);

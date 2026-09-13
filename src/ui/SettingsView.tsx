@@ -1,7 +1,8 @@
 import React from 'react';
 import {
   clearAllCourses, confirmDanger, exportIcsNow, exportThemeNow, importIcsFromFile, importTimetableFromFile,
-  openChangelog, openCloudSheet, openExport, openImportSheet, openManual, openScheme, openShare, patchPrefs,
+  openChangelog, openCloudSheet, openExport, openHistory, openImportSheet, openManual, openScheme,
+  openShare, patchPrefs,
   setNotifyStatus, shareWeekImage, toastSave, setReminderRule, setTerm, showToast, updateLine, useApp,
   checkUpdateNow,
 } from '../app/store';
@@ -576,7 +577,22 @@ export default function SettingsView() {
       </Panel>
 
       {/* ------------------------------ 保护 ------------------------------ */}
-      <Panel title="防误触" sub={s.prefs.studioLocked !== false ? '外观已锁' : '外观已解锁'} collapsible>
+      <Panel
+        title="防误触与撤销"
+        sub={s.history.undo > 0 ? '可撤销 ' + s.history.undo + ' 步' : (s.prefs.studioLocked !== false ? '外观已锁' : '外观已解锁')}
+        collapsible
+      >
+        <div className="list-row tap" style={{ cursor: 'pointer' }} onClick={openHistory}>
+          <div>
+            <div className="lr-label">操作历史</div>
+            <div className="lr-sub">
+              {s.history.undo > 0
+                ? '最近 ' + s.history.undo + ' 步改动都在这里，可以退回任意一步（刚才：' + (s.history.lastLabel || '—') + '）'
+                : '还没有可撤销的改动；这里能看到最近的改动并退回任意一步'}
+            </div>
+          </div>
+          <div className="lr-right">›</div>
+        </div>
         <SwitchRow
           label="外观锁定"
           sub="外观页默认只读，要先点「解锁」才能改；离开页面或 3 分钟不动会自动锁回去"

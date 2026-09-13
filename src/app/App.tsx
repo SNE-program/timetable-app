@@ -2,7 +2,7 @@ import React from 'react';
 import {
   closeSheets, dismissToast, importMascotPack, importMascotSheet, importThemeFromFile, jumpToDate, openAdd, openCourse,
   openMascotEditor, openSearch, openTask, patchMascotPrefs, patchPrefs, patchWallpaper, redo, removeMascot,
-  checkUpdateNow, cloudFillProfile, cloudResume, openCloudSheet, resolveConfirm, setNotify, setNotifyStatus,
+  checkUpdateNow, cloudFillProfile, cloudResume, openCloudSheet, openHistory, resolveConfirm, setNotify, setNotifyStatus,
   setSystemDark, setTab, setWeek, showToast, takeMigrateNotes, undo, useApp,
 } from './store';
 import { cloudConfigured } from '../cloud/config';
@@ -17,6 +17,7 @@ import ErrorBoundary from '../ui/ErrorBoundary';
 import MascotEditor from '../ui/MascotEditor';
 import { isVideoFile, videoToSpriteSheet } from '../theme/videoSheet';
 import ChangelogSheet from '../ui/ChangelogSheet';
+import HistorySheet from '../ui/HistorySheet';
 import PasswordSheet from '../ui/PasswordSheet';
 import CloudSheet from '../ui/CloudSheet';
 import UpdateSheet from '../ui/UpdateSheet';
@@ -61,6 +62,24 @@ export default function App() {
   /* 电脑（宽屏）布局：只在浏览器里、且窗口足够宽时打开，见 useWideLayout 的注释 */
   const wide = useWideLayout();
   const [dragging, setDragging] = React.useState(false);
+  /*
+   * 顶栏撤销按钮的长按检测。和课程卡的长按是同一个约定（600ms），
+   * 用户不用学第二套手势；触发之后抑制随后的 click。
+   */
+  const pressTimer = React.useRef<number | null>(null);
+  const longPressed = React.useRef(false);
+  function startPress(fn: () => void): void {
+    longPressed.current = false;
+    clearPress();
+    pressTimer.current = window.setTimeout(function () {
+      pressTimer.current = null;
+      longPressed.current = true;
+      fn();
+    }, 600);
+  }
+  function clearPress(): void {
+    if (pressTimer.current !== null) { window.clearTimeout(pressTimer.current); pressTimer.current = null; }
+  }
   const stripRef = React.useRef<HTMLDivElement>(null);
   const activePillRef = React.useRef<HTMLButtonElement>(null);
 
@@ -428,15 +447,32 @@ export default function App() {
                 </div>
               </div>
               <div className="topbar-actions">
-                {/* 只在确实有东西可撤销/重做时才出现 —— 平时顶栏保持干净 */}
+                {/*
+                  撤销 / 重做。
+                  轻点 = 退一步；**长按 = 打开操作历史** —— 只给一个 ↶ 的话，
+                  用户不知道它会退回哪一步、还有几笔，两步以上就只能连点。
+                */}
                 {s.history.undo > 0 ? (
                   <button
-                    className="icon-btn" title={'撤销：' + (s.history.lastLabel || '上一步')}
-                    onClick={function () { undo(); }}
+                    className="icon-btn" title={'撤销：' + (s.history.lastLabel || '上一步') + '（长按看历史）'}
+                    aria-label={'撤销：' + (s.history.lastLabel || '上一步')}
+                    onClick={function () { if (!longPressed.current) undo(); longPressed.current = false; }}
+                    onPointerDown={function () { startPress(openHistory); }}
+                    onPointerUp={clearPress}
+                    onPointerLeave={clearPress}
+                    onPointerCancel={clearPress}
                   >↶</button>
                 ) : null}
                 {s.history.redo > 0 ? (
-                  <button className="icon-btn" title="重做" onClick={function () { redo(); }}>↷</button>
+                  <button
+                    className="icon-btn" title="重做（长按看历史）"
+                    aria-label="重做"
+                    onClick={function () { if (!longPressed.current) redo(); longPressed.current = false; }}
+                    onPointerDown={function () { startPress(openHistory); }}
+                    onPointerUp={clearPress}
+                    onPointerLeave={clearPress}
+                    onPointerCancel={clearPress}
+                  >↷</button>
                 ) : null}
                 {/*
                   云备份入口：与设置、搜索、添加并排放在右上角。
@@ -586,6 +622,7 @@ export default function App() {
       {/* 登录完之后问一句"要怎么同步" —— 猜错就是丢数据，所以不替用户选 */}
       {s.cloud.syncAsk ? <SyncSheet /> : null}
       {s.update.sheet ? <UpdateSheet /> : null}
+      {s.historySheet ? <HistorySheet /> : null}
       {s.manualSheet ? <ManualView /> : null}
       {s.changelogSheet ? <ChangelogSheet /> : null}
 

@@ -1,5 +1,5 @@
 import React from 'react';
-import { markAttendance, openAdd, openCourse, useApp } from '../app/store';
+import { deleteOverride, markAttendance, openAdd, openCourse, useApp } from '../app/store';
 import type { AttendanceStatus } from '../core/types';
 import { conflictsOf, expandDay, freeSlots, nextEvent, parseISODate, todayISO } from '../core/engine';
 import { courseColor, resolvePalette } from '../theme/palette';
@@ -157,6 +157,11 @@ export default function TodayView() {
             const c = item.c;
             const cc = courseColor(palette, e.colorIndex);
             const past = e.endMinutes <= nowMin;
+            /* 这一节如果被调过，找出那条调整 —— 用于就地恢复 */
+            const ov = (data.overrides || []).filter(function (o) {
+              return o.sessionId === e.sessionId && o.date === e.date;
+            })[0];
+            const overrideId = ov ? ov.id : '';
             const isNow = e.startMinutes <= nowMin && nowMin < e.endMinutes;
             let cls = 'tl-item';
             if (past) cls += ' past';
@@ -186,7 +191,18 @@ export default function TodayView() {
                       })}
                     </div>
                   ) : null}
-                  {e.modifiedBy ? <div className="tl-meta">已调课 / 临时调整</div> : null}
+                  {e.modifiedBy ? (
+                    <div className="tl-meta" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span>已调课 / 临时调整</span>
+                      {/* 今天刚停掉/改过的课，就地就能恢复 —— 不用去长按课程卡再翻面板 */}
+                      {overrideId ? (
+                        <button
+                          className="btn sm ghost"
+                          onClick={function (ev) { ev.stopPropagation(); deleteOverride(overrideId); }}
+                        >恢复这一次</button>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
               </div>
             );

@@ -181,7 +181,7 @@ export default function ThemeStudio() {
         <div style={{ padding: '0 16px 10px' }}>
           <Segmented<ModePref>
             value={theme.modePref}
-            onChange={function (v) { patchTheme({ modePref: v }); }}
+            onChange={function (v) { patchTheme({ modePref: v }, false, 'theme:mode'); }}
             options={[
               { value: 'light', label: '浅色' },
               { value: 'dark', label: '深色' },
@@ -192,7 +192,7 @@ export default function ThemeStudio() {
         <div style={{ padding: '0 16px 14px' }}>
           <Segmented<string>
             value={String(theme.showDays || 7)}
-            onChange={function (v) { patchTheme({ showDays: Number(v) }); }}
+            onChange={function (v) { patchTheme({ showDays: Number(v) }, false, 'theme:days'); }}
             options={[
               { value: '5', label: '只工作日' },
               { value: '6', label: '到周六' },
@@ -206,7 +206,7 @@ export default function ThemeStudio() {
         <div className="wp-grid">
           <button
             className={wp.kind === 'none' ? 'wp-item active' : 'wp-item'}
-            onClick={function () { patchWallpaper({ kind: 'none' }); }}
+            onClick={function () { patchWallpaper({ kind: 'none' }, 'theme:wp'); }}
           >
             <div className="wp-item none">无</div>
             <div className="wp-name">纯色</div>
@@ -217,7 +217,7 @@ export default function ThemeStudio() {
               <button
                 key={w.id}
                 className={active ? 'wp-item active' : 'wp-item'}
-                onClick={function () { patchWallpaper({ kind: 'preset', presetId: w.id }); }}
+                onClick={function () { patchWallpaper({ kind: 'preset', presetId: w.id }, 'theme:wp'); }}
               >
                 <img src={wallpaperSrc(w.id)} alt={w.name} />
                 <div className="wp-name">{w.name}</div>
@@ -225,7 +225,7 @@ export default function ThemeStudio() {
             );
           })}
           {wp.kind === 'custom' && wp.custom ? (
-            <button className="wp-item active" onClick={function () { patchWallpaper({ kind: 'custom' }); }}>
+            <button className="wp-item active" onClick={function () { patchWallpaper({ kind: 'custom' }, 'theme:wp'); }}>
               <img src={wp.custom} alt="我的图片" />
               <div className="wp-name">我的</div>
             </button>
@@ -262,7 +262,7 @@ export default function ThemeStudio() {
             {wp.original ? (
               <button className="btn sm" onClick={function () { setCropSrc(wp.original || null); }}>重新剪裁</button>
             ) : null}
-            <button className="btn sm ghost" onClick={function () { patchWallpaper({ kind: 'none', custom: '', original: undefined }); }}>移除</button>
+            <button className="btn sm ghost" onClick={function () { patchWallpaper({ kind: 'none', custom: '', original: undefined }, 'theme:wp'); }}>移除</button>
           </div>
         ) : null}
 
@@ -273,7 +273,7 @@ export default function ThemeStudio() {
               <div style={{ marginTop: 6 }}>
                 <Segmented<WallpaperFit>
                   value={wp.fit || 'cover'}
-                  onChange={function (v) { patchWallpaper({ fit: v }); }}
+                  onChange={function (v) { patchWallpaper({ fit: v }, 'theme:fit'); }}
                   options={[
                     { value: 'cover', label: '填满' },
                     { value: 'contain', label: '完整' },
@@ -285,8 +285,8 @@ export default function ThemeStudio() {
                 填满＝铺满屏幕并裁掉多余部分；完整＝整张图都显示、两边留底色；平铺＝小图重复铺开。
               </div>
             </div>
-            <SliderRow label="背景模糊" value={wp.blur} min={0} max={30} step={1} format={function (v) { return v + ' px'; }} onChange={function (v) { patchWallpaper({ blur: v }); }} />
-            <SliderRow label="背景压暗 / 提亮" value={Math.round(wp.scrim * 100)} min={0} max={90} step={2} format={function (v) { return v + '%'; }} onChange={function (v) { patchWallpaper({ scrim: v / 100 }); }} />
+            <SliderRow label="背景模糊" value={wp.blur} min={0} max={30} step={1} format={function (v) { return v + ' px'; }} onChange={function (v) { patchWallpaper({ blur: v }, 'theme:blur'); }} />
+            <SliderRow label="背景压暗 / 提亮" value={Math.round(wp.scrim * 100)} min={0} max={90} step={2} format={function (v) { return v + '%'; }} onChange={function (v) { patchWallpaper({ scrim: v / 100 }, 'theme:scrim'); }} />
           </div>
         ) : null}
       </Panel>
@@ -299,7 +299,7 @@ export default function ThemeStudio() {
                 key={c}
                 className={theme.accent.toLowerCase() === c.toLowerCase() ? 'swatch active' : 'swatch'}
                 style={{ background: c }}
-                onClick={function () { patchTheme({ accent: c, courseColors: [] }); }}
+                onClick={function () { patchTheme({ accent: c, courseColors: [] }, false, 'theme:accent'); }}
                 title={c}
               />
             );
@@ -307,7 +307,7 @@ export default function ThemeStudio() {
           <ColorField
             title="自定义主色"
             value={theme.accent}
-            onChange={function (v) { patchTheme({ accent: v, courseColors: [] }); }}
+            onChange={function (v) { patchTheme({ accent: v, courseColors: [] }, false, 'theme:accent'); }}
           />
         </div>
         <div className="palette-grid">
@@ -315,14 +315,14 @@ export default function ThemeStudio() {
             return <div key={i} className="palette-chip" style={{ background: c }} />;
           })}
         </div>
-        <SliderRow label="课程色彩饱和" value={Math.round(theme.courseSaturation * 100)} min={0} max={140} step={5} format={function (v) { return v + '%'; }} onChange={function (v) { patchTheme({ courseSaturation: v / 100, courseColors: [] }); }} />
+        <SliderRow label="课程色彩饱和" value={Math.round(theme.courseSaturation * 100)} min={0} max={140} step={5} format={function (v) { return v + '%'; }} onChange={function (v) { patchTheme({ courseSaturation: v / 100, courseColors: [] }, false, 'theme:sat'); }} />
       </Panel>
 
       <Panel title="课程卡" sub="五种质感" collapsible desc="默认的「色条」：颜色只出现在左侧色条上，卡片保持白底描边，一眼能扫完一整天。">
         <div style={{ padding: '4px 16px 14px' }}>
           <Segmented<CardStyle>
             value={theme.cardStyle}
-            onChange={function (v) { patchTheme({ cardStyle: v }); }}
+            onChange={function (v) { patchTheme({ cardStyle: v }, false, 'theme:card'); }}
             options={[
               { value: 'line', label: '色条' },
               { value: 'solid', label: '纯色' },
@@ -332,16 +332,16 @@ export default function ThemeStudio() {
             ]}
           />
         </div>
-        <SliderRow label="卡片不透明度" value={Math.round(theme.cardOpacity * 100)} min={30} max={100} step={5} format={function (v) { return v + '%'; }} onChange={function (v) { patchTheme({ cardOpacity: v / 100 }); }} />
-        <SliderRow label="圆角" value={theme.radius} min={0} max={24} step={1} format={function (v) { return v <= 6 ? v + ' px · 工业' : v + ' px'; }} onChange={function (v) { patchTheme({ radius: v }); }} />
-        <SliderRow label="面板通透度" value={Math.round(theme.panelAlpha * 100)} min={30} max={100} step={5} format={function (v) { return v + '%'; }} onChange={function (v) { patchTheme({ panelAlpha: v / 100, glassBlur: theme.glassBlur || 18 }); }} />
+        <SliderRow label="卡片不透明度" value={Math.round(theme.cardOpacity * 100)} min={30} max={100} step={5} format={function (v) { return v + '%'; }} onChange={function (v) { patchTheme({ cardOpacity: v / 100 }, false, 'theme:cardop'); }} />
+        <SliderRow label="圆角" value={theme.radius} min={0} max={24} step={1} format={function (v) { return v <= 6 ? v + ' px · 工业' : v + ' px'; }} onChange={function (v) { patchTheme({ radius: v }, false, 'theme:radius'); }} />
+        <SliderRow label="面板通透度" value={Math.round(theme.panelAlpha * 100)} min={30} max={100} step={5} format={function (v) { return v + '%'; }} onChange={function (v) { patchTheme({ panelAlpha: v / 100, glassBlur: theme.glassBlur || 18 }, false, 'theme:panel'); }} />
       </Panel>
 
       <Panel title="文字与排版" sub="字体 · 字号 · 密度" collapsible>
         <div style={{ padding: '4px 16px 14px' }}>
           <Segmented<FontKey>
             value={theme.font}
-            onChange={function (v) { patchTheme({ font: v }); }}
+            onChange={function (v) { patchTheme({ font: v }, false, 'theme:font'); }}
             options={[
               { value: 'system', label: '默认' },
               { value: 'serif', label: '衬线' },
@@ -350,11 +350,11 @@ export default function ThemeStudio() {
             ]}
           />
         </div>
-        <SliderRow label="字号缩放" value={Math.round(theme.fontScale * 100)} min={85} max={130} step={1} format={function (v) { return v + '%'; }} onChange={function (v) { patchTheme({ fontScale: v / 100 }); }} />
+        <SliderRow label="字号缩放" value={Math.round(theme.fontScale * 100)} min={85} max={130} step={1} format={function (v) { return v + '%'; }} onChange={function (v) { patchTheme({ fontScale: v / 100 }, false, 'theme:fs'); }} />
         <div style={{ padding: '4px 16px 14px' }}>
           <Segmented<Density>
             value={theme.density}
-            onChange={function (v) { patchTheme({ density: v }); }}
+            onChange={function (v) { patchTheme({ density: v }, false, 'theme:density'); }}
             options={[
               { value: 'compact', label: '紧凑' },
               { value: 'comfortable', label: '标准' },
@@ -362,12 +362,12 @@ export default function ThemeStudio() {
             ]}
           />
         </div>
-        <SwitchRow label="显示任课教师" on={theme.showTeacher} onChange={function (v) { patchTheme({ showTeacher: v }); }} />
+        <SwitchRow label="显示任课教师" on={theme.showTeacher} onChange={function (v) { patchTheme({ showTeacher: v }, false, 'theme:teacher'); }} />
         <SwitchRow
           label="色盲友好配色"
           sub="课程色改为「色相 + 明度」双维度区分，红了绿了都能分清，转成灰度也能认"
           on={theme.colorBlind}
-          onChange={function (v) { patchTheme({ colorBlind: v, courseColors: [] }); }}
+          onChange={function (v) { patchTheme({ colorBlind: v, courseColors: [] }, false, 'theme:cb'); }}
         />
       </Panel>
 

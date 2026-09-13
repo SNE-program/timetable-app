@@ -85,6 +85,32 @@ export default function OverrideSheet(props: { sessionId: string }) {
         {session.location ? ' · ' + session.location : ''}
       </div>
 
+      {/*
+        已有的调整放在**最上面**。
+        原来它在面板最底下（提醒设置之后），于是"停错了一次课想恢复"要：
+        长按课程卡 → 打开面板 → 滚到底 → 找到那一行 → 点「撤销」。
+        现在打开就能看见，按钮也改成「恢复」—— 与"撤销全局操作"区分开。
+      */}
+      {existing.length > 0 ? (
+        <React.Fragment>
+          <div className="section-title">这门课已调整的 {existing.length} 次</div>
+          <div className="card-block" style={{ marginBottom: 14 }}>
+            {existing.map(function (o) {
+              return (
+                <div className="list-row" key={o.id}>
+                  <div>
+                    <div className="lr-label">{shortDateLabel(o.date)} · {describe(o as { action: OverrideAction; patch?: Record<string, unknown> })}</div>
+                    <div className="lr-sub">{o.reason || '未填原因'} · 点「恢复」这一次课就按原样上</div>
+                  </div>
+                  <div className="spacer" />
+                  <button className="btn sm" onClick={function () { deleteOverride(o.id); }}>恢复</button>
+                </div>
+              );
+            })}
+          </div>
+        </React.Fragment>
+      ) : null}
+
       <div className="section-title">调整哪一次</div>
       {occurrences.length === 0 ? (
         <div className="panel-desc">这门课在未来没有可调整的安排（可能周次已经结束）。</div>
@@ -195,23 +221,6 @@ export default function OverrideSheet(props: { sessionId: string }) {
         </div>
       </div>
 
-      <div className="section-title">这门课已有的调整 · {existing.length}</div>
-      <div className="card-block">
-        {existing.length === 0 ? (
-          <div className="list-row"><div className="lr-sub">还没有调整记录</div></div>
-        ) : existing.map(function (o) {
-          return (
-            <div className="list-row" key={o.id}>
-              <div>
-                <div className="lr-label">{shortDateLabel(o.date)} · {describe(o as { action: OverrideAction; patch?: Record<string, unknown> })}</div>
-                <div className="lr-sub">{o.reason || '未填原因'}</div>
-              </div>
-              <div className="spacer" />
-              <button className="btn sm ghost" onClick={function () { deleteOverride(o.id); }}>撤销</button>
-            </div>
-          );
-        })}
-      </div>
     </Sheet>
   );
 }

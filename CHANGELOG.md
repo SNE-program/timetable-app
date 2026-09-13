@@ -8,6 +8,63 @@
 
 ---
 
+## v1.9.4
+
+撤销重做返工：快照升级成整份文档，调课 / 停课可一键恢复
+
+反馈：**「撤销等操作非常奇怪（用的难受，感觉很鸡肋，尤其是撤销读取云端数据。这个云端-本地的数据结构与操作方式可能还要优化），能不能优化一下？或者，直接保证所有操作是可逆的是否可行？我注意到特殊原因编辑课表（调课/停课）之后无法便捷的恢复，这个也要思考一下怎么改。」**
+
+**① 三个病灶**
+
+| 现象 | 真实原因 |
+| --- | --- |
+| 撤销「从云端恢复」之后更奇怪 | `ChangeSnapshot` 里**只有 `data`**；而云端恢复替换的是「整份文档」。撤销只换回课表、外观仍是云端那份 → 半还原 |
+| 撤销感觉鸡肋 | 只有最后一步可撤，提示条 4 秒即消失，之后没有入口；文案说的是「上一步」而不是「你刚做的那一步」 |
+| 调课 / 停课之后恢复不了 | override 是「给这一次课加一条调整」，面板里已调整项列在**最底部**、按钮叫「删除」，看不出等于恢复原样 |
+
+**② 数据模型：`ChangeSnapshot` 升级为整份文档**
+
+```ts
+interface ChangeSnapshot { data: AppData; theme: ThemeState; prefs?: PrefsState }
+interface ChangeSet { id; label; source; at; before; after; coalesceKey? }
+```
+
+- `setData(data, label, source, coalesceKey?)`：普通编辑，before / after 都是整份快照
+- `applyDocument({ data, theme, prefs? }, label, source)`：一次改好几样的操作（云端恢复、整份导入）打包成一笔
+- `setThemeWithHistory(next, label, coalesceKey?)` 与 `patchTheme(patch, silent?, historyKey?)`：外观编辑进历史，连续拖动按 key 合并（4000ms 窗口、深度上限 40）
+- 撤销 / 重做统一走 `writeSnapshot()`，不存在「只退一半」
+- 新增 `peekUndo()` / `historyEntries()` / `undoTo(id)` / `redoEntries()` / `recentChanges()` / `redoBriefs()`；`ChangeBrief` 只带标签与时间，面板不会把快照拖进内存
+
+**云端 - 本地不做差量合并**：本地是权威副本，云上存整份快照，恢复 = 整份替换，
+逆操作自然是「换回本地上一整份」。逐字段 diff 只会制造「有些字段没跟上」的半个状态。
+
+**③ 入口收敛**
+
+| 入口 | 行为 |
+| --- | --- |
+| 顶栏 ↶ / ↷ | 轻点 = 撤销 / 重做；**长按 600ms** = 打开「操作历史」（`App.tsx` 里 `startPress` / `clearPress` / `longPressed`） |
+| 操作历史（新面板 `src/ui/HistorySheet.tsx`）| 列出最近可撤销步骤（标签 + 时分秒），点行 = `undoTo(id)` 退回那一步；下方列可重做项。注明最多 40 步、只在本次运行内 |
+| 设置 →「防误触与撤销」 | 新增「操作历史」入口，副标题显示可撤销步数 |
+| 提示条 | `upsertOverride`（调课 / 停课 / 换教室）、`markAttendance`、`toggleTask`、`deleteTask`、`importTimetableFromFile`、`importIcsFromFile`、`applySheetImport`、`importThemeObject`、`cloudRestoreNow`、`applyPreset`、`resetTheme` 全部带撤销 |
+| 调课面板 | 已调整项**移到面板最上方**（「这门课已调整的 N 次」），按钮由「删除」改成**「恢复」**，附一句「点「恢复」这一次课就按原样上」 |
+| 今日页 | 被调整的那一节下面给「恢复这一次」（`TodayView.tsx`，`ov` / `overrideId` 定位） |
+
+**④ 可逆的边界**
+
+可逆：课表增删改、调课 / 停课 / 换教室、考勤、任务、导入（课表 / 日历 / 表格）、外观与偏好。
+不可逆（说明书里写明）：删除云端备份、注销账号、上传角色、卸载或清除应用数据。
+
+**⑤ 验证**
+
+- `src/app/history.test.ts` 重写（9 个）：栈语义、40 步上限、合并、`briefs` 不含快照
+- `src/app/store.undo.test.ts` +4：主题撤销 / 重做、`applyDocument` 三件一起回退、只改课表不动主题、`historyEntries` / `undoTo` / `redoEntries`
+- 全量单测、`tsc --noEmit`、无头浏览器 320 / 360 / 390 三档布局扫描
+
+**⑥ 交付**
+
+待构建完成后补：APK 体积 / SHA-256、线上地址。
+
+---
 ## v1.9.3
 
 角色改用分享码分享

@@ -32,7 +32,8 @@ import {
   type ExportColumn,
 } from '../core/exporters';
 import {
-  popRedo, popUndo, pushRedo, pushUndo, recordChange, redoSize, resetHistory, undoSize, type ChangeSource,
+  peekUndo, popRedo, popUndo, pushRedo, pushUndo, recentChanges, recordChange, redoBriefs, redoSize,
+  resetHistory, undoSize, type ChangeBrief, type ChangeSnapshot, type ChangeSource,
 } from './history';
 import {
   CloudError, callFunction, deleteBackup, fetchBackup, fetchMe, saveBackup, sendRecover,
@@ -169,6 +170,8 @@ export interface AppState {
   manualSection: string | null;
   /** 更新日志（版本改动记录） */
   changelogSheet: boolean;
+  /** 操作历史面板（撤销/重做的可读版本） */
+  historySheet: boolean;
   toast: Toast | null;
   confirm: ConfirmRequest | null;
   /** 撤销/重做栈的摘要，供界面显示按钮可用状态 */
@@ -628,6 +631,8 @@ function initialState(): AppState {
     toast: null,
     confirm: null,
     history: { undo: 0, redo: 0, lastLabel: null },
+    /* ?open=history 直接摊开「操作历史」，方便在窄屏上量这个面板（只有带参数时才开） */
+    historySheet: openParam() === 'history',
     notify: initialNotify(),
     upcoming: [],
     cloud: initialCloud(loadPrefs().autoLogin !== false),
@@ -796,6 +801,26 @@ function withUndo(toastText: string, label: string, mutate: () => TimetableData)
 
 /* ------------------------------ 课表数据 ------------------------------ */
 
+/**
+ * 当下的整份文档快照。
+ *
+ * 只放 data 与 theme —— prefs 只给「整份文档级」的操作（云端恢复 / 备份导入）单独带上，
+ * 否则撤销一次改课程会把用户后来随手拨的开关一起退回去，那才叫奇怪。
+ */
+function snapshot(prefs?: Record<string, unknown>): ChangeSnapshot {
+  return { data: state.data, theme: state.theme, prefs: prefs };
+}
+
+/** 把一份快照写回本机（数据 + 外观 + 可选偏好），撤销/重做与整份文档操作都走它 */
+function writeSnapshot(snap: ChangeSnapshot, label?: string): void {
+  writeData(snap.data, label);
+  if (snap.theme && snap.theme !== state.theme) {
+    try { persistTheme(snap.theme); } catch (e) { /* persistTheme 自己已经提示过 */ }
+    setState({ theme: snap.theme });
+  }
+  if (snap.prefs) patchPrefs(snap.prefs);
+}
+
 /** 只落库、不动历史。撤销/重做内部走它，避免把回退本身又记成一笔 */
 function writeData(data: TimetableData, label?: string): void {
   const patch: Partial<AppState> = { data: data };
@@ -827,11 +852,52 @@ function writeData(data: TimetableData, label?: string): void {
  * 像考勤打卡、任务勾选这种高频低风险的动作则刻意不记，
  * 免得撤销栈里塞满噪音，真正想撤的那一步反而找不着。
  */
-export function setData(data: TimetableData, label?: string, source: ChangeSource = 'user'): string | null {
+export function setData(
+  data: TimetableData, label?: string, source: ChangeSource = 'user', coalesceKey?: string
+): string | null {
   let id: string | null = null;
-  if (label) id = recordChange(label, source, state.data, data).id;
+  if (label) {
+    /*
+     * before = 现在的样子，after = 改完之后的样子。
+     * 外观两边是同一个引用：撤销/重做一次改课程**不会**动外观。
+     */
+    const before = snapshot();
+    const after: ChangeSnapshot = { data: data, theme: state.theme };
+    id = recordChange(label, source, before, after, coalesceKey).id;
+  }
   writeData(data, label);
   return id;
+}
+
+/**
+ * 整份文档级的一次改动：数据、外观、偏好一起记成一笔。
+ *
+ * 「从云端恢复」原来只把 data 记进历史，撤销之后外观还是云端那份 ——
+ * 半还原比不能撤销更让人困惑。凡是"一次改好几样"的操作都走这里。
+ */
+export function applyDocument(
+  next: { data: TimetableData; theme: Theme; prefs?: Record<string, unknown> },
+  label: string, source: ChangeSource = 'import'
+): string {
+  const before = snapshot(state.prefs as unknown as Record<string, unknown>);
+  const after: ChangeSnapshot = {
+    data: next.data,
+    theme: next.theme,
+    prefs: next.prefs === undefined
+      ? undefined
+      : Object.assign({}, before.prefs, next.prefs),
+  };
+  const id = recordChange(label, source, before, after).id;
+  writeSnapshot(after, label);
+  return id;
+}
+
+/** 改外观并记一笔历史。label 相同且给了 key 的连续改动会合并成一步（滑块拖动） */
+export function setThemeWithHistory(next: Theme, label: string, coalesceKey?: string): void {
+  const before = snapshot();
+  const after: ChangeSnapshot = { data: state.data, theme: next };
+  recordChange(label, 'user', before, after, coalesceKey);
+  writeSnapshot(after, label);
 }
 
 function historySummary(label: string | null): AppState['history'] {
@@ -852,15 +918,60 @@ export function clearHistory(): void {
 export function canUndo(): boolean { return state.history.undo > 0; }
 export function canRedo(): boolean { return state.history.redo > 0; }
 
-/** 撤销一步 */
-export function undo(): boolean {
+/** 撤销一步，不弹提示条（历史面板里连撤多步时用） */
+function undoQuiet(): string | null {
   const set = popUndo();
-  if (!set) return false;
+  if (!set) return null;
   pushRedo(set);
-  writeData(set.before);
+  /* 走 writeSnapshot：数据、外观（整份文档级操作还含偏好）一起回退 */
+  writeSnapshot(set.before);
   setState({ history: historySummary(set.label) });
-  showToast('已撤销：' + set.label, 'info');
+  return set.label;
+}
+
+/** 撤销一步。撤销之后还能重做 —— 提示条上直接给按钮，不用去翻别的入口 */
+export function undo(): boolean {
+  const label = undoQuiet();
+  if (label === null) return false;
+  showToast('已撤销：' + label, 'info', function () { redo(); });
   return true;
+}
+
+/* ------------------------------ 操作历史（可读版） ------------------------------ */
+
+export function openHistory(): void { setState({ historySheet: true }); }
+export function closeHistory(): void { setState({ historySheet: false }); }
+
+/** 面板里列出来的最近几步（摘要，不带快照） */
+export function historyEntries(limit?: number): ChangeBrief[] {
+  return recentChanges(limit && limit > 0 ? limit : 12);
+}
+export function redoEntries(limit?: number): ChangeBrief[] {
+  return redoBriefs(limit && limit > 0 ? limit : 6);
+}
+
+/**
+ * 一直撤销到某一笔（含它）。
+ *
+ * 这是"历史面板"真正的价值：不是一步步退，而是**退到某个时刻**。
+ * 返回撤销了几步，界面据此说一句话。
+ */
+export function undoTo(id: string): number {
+  let n = 0;
+  while (true) {
+    const top = peekUndo();
+    if (!top) break;
+    const label = undoQuiet();
+    if (label === null) break;
+    n++;
+    if (top.id === id) break;
+    if (n > 60) break;   /* 兜底：栈深 40，这里只是防御 */
+  }
+  if (n > 0) {
+    const top = peekUndo();
+    showToast('已撤销 ' + n + ' 步' + (top ? '，现在是：' + top.label + ' 之后的状态' : ''), 'info');
+  }
+  return n;
 }
 
 /** 重做一步 */
@@ -868,9 +979,9 @@ export function redo(): boolean {
   const set = popRedo();
   if (!set) return false;
   pushUndo(set);
-  writeData(set.after);
+  writeSnapshot(set.after);
   setState({ history: historySummary(set.label) });
-  showToast('已重做：' + set.label, 'info');
+  showToast('已重做：' + set.label, 'info', function () { undo(); });
   return true;
 }
 
@@ -880,7 +991,7 @@ function undoChangeById(id: string): boolean {
   if (!top) return false;
   if (top.id !== id) { pushUndo(top); return false; }
   pushRedo(top);
-  writeData(top.before);
+  writeSnapshot(top.before);
   setState({ history: historySummary(top.label) });
   return true;
 }
@@ -934,8 +1045,17 @@ export function upsertOverride(input: {
     patch: input.patch,
     reason: input.reason,
   };
-  setData(Object.assign({}, state.data, { overrides: rest.concat([ov]) }), OVERRIDE_LABEL[input.action]);
-  showToast('调整已生效，课表与提醒会自动重排', 'ok');
+  const id = setData(Object.assign({}, state.data, { overrides: rest.concat([ov]) }), OVERRIDE_LABEL[input.action]);
+  /*
+   * 提示条上直接给「撤销」。
+   *
+   * 以前这里只说"调整已生效"，想退回就得去找顶栏那个 ↶ ——
+   * 而调课/停课恰恰是最容易点错、也最需要立刻反悔的一类操作。
+   */
+  showToast(ACTION_TITLE[input.action] + '，课表与提醒会自动重排', 'ok', function () {
+    if (id && undoChangeById(id)) showToast('已撤销这次调整', 'info');
+    else showToast('这一步之后又有改动，已经撤不回去了', 'warn');
+  });
 
   /*
    * 变动补一条即时通知。调课这类操作常常是在匆忙里做完的，
@@ -977,7 +1097,7 @@ function overrideDetail(o: Override, courseName: string): string {
 
 export function deleteOverride(id: string): void {
   const gone = state.data.overrides.filter(function (o) { return o.id === id; })[0];
-  withUndo('已移除这次调整', '移除调整', function () { return Object.assign({}, state.data, {
+  withUndo('已恢复这一次课的原样安排', '恢复调整', function () { return Object.assign({}, state.data, {
     overrides: state.data.overrides.filter(function (o) { return o.id !== id; }),
   }); });
   if (gone) announceChange('已恢复原课表', gone.date + ' 的调整已撤销');
@@ -1009,16 +1129,29 @@ export function upsertTask(input: { id?: string; title: string; courseId?: strin
 }
 
 export function toggleTask(id: string): void {
-  setData(Object.assign({}, state.data, {
-    tasks: state.data.tasks.map(function (t) { return t.id === id ? Object.assign({}, t, { done: !t.done }) : t; }),
-  }));
+  const t = state.data.tasks.filter(function (x) { return x.id === id; })[0];
+  /*
+   * 勾选本身就是可逆的（再点一次），所以**不弹提示条**；
+   * 但它会进历史栈（合并键按任务 id），这样"历史"面板里能看到、也能整段撤回。
+   */
+  setData(
+    Object.assign({}, state.data, {
+      tasks: state.data.tasks.map(function (x) { return x.id === id ? Object.assign({}, x, { done: !x.done }) : x; }),
+    }),
+    t && t.done ? '取消完成：' + (t.title || '任务') : '完成任务：' + (t && t.title ? t.title : '任务'),
+    'user',
+    'task:' + id
+  );
 }
 
 export function deleteTask(id: string): void {
-  setData(Object.assign({}, state.data, {
+  const id2 = setData(Object.assign({}, state.data, {
     tasks: state.data.tasks.filter(function (t) { return t.id !== id; }),
   }), '删除任务');
-  showToast('已删除任务', 'ok');
+  showToast('已删除任务', 'ok', function () {
+    if (id2 && undoChangeById(id2)) showToast('已恢复该任务', 'info');
+    else showToast('这一步之后又有改动，已经撤不回去了', 'warn');
+  });
 }
 
 /* ------------------------------ 考勤 ------------------------------ */
@@ -1035,8 +1168,26 @@ export function markAttendance(sessionId: string, date: string, status: Attendan
   } else {
     next = list.concat([{ id: 'at' + Date.now(), sessionId: sessionId, date: date, status: status }]);
   }
-  setData(Object.assign({}, state.data, { attendance: next }));
+  /*
+   * 考勤以前刻意不进历史（"高频低风险"），但它其实是**最容易点错**的一格：
+   * 手一滑记成"缺"，汇总里就多一次缺席。现在记一笔，而且用 (时段, 日期) 当合并键 ——
+   * 同一个格子上连点几次只算一步，撤销就是"退回点之前"。
+   */
+  const id = setData(
+    Object.assign({}, state.data, { attendance: next }),
+    '考勤：' + ATTENDANCE_LABEL[status],
+    'user',
+    'attendance:' + sessionId + ':' + date
+  );
+  showToast('已记为「' + ATTENDANCE_LABEL[status] + '」', 'ok', function () {
+    if (id && undoChangeById(id)) showToast('已撤销考勤记录', 'info');
+    else showToast('这一步之后又有改动，已经撤不回去了', 'warn');
+  });
 }
+
+const ATTENDANCE_LABEL: Record<AttendanceStatus, string> = {
+  present: '到', late: '迟到', absent: '缺勤', leave: '请假',
+};
 
 export function attendanceFor(sessionId: string, date: string): AttendanceStatus | null {
   const a = (state.data.attendance || []).find(function (x) { return x.sessionId === sessionId && x.date === date; });
@@ -1123,11 +1274,15 @@ export async function importTimetableFromFile(file: File): Promise<void> {
     const text = await file.text();
     const r = parseTimetable(text);
     if (!r.ok) { showToast('导入失败：' + r.error, 'error'); return; }
-    setData(r.data, '导入课表', 'import');
+    const id = setData(r.data, '导入课表', 'import');
     setWeek(clampWeek(weekOfDate(r.data.term, todayISO())));
     showToast(
       '已导入 ' + r.data.courses.length + ' 门课' + (r.warnings.length ? '（' + r.warnings.length + ' 条提示）' : ''),
-      'ok'
+      'ok',
+      function () {
+        if (id && undoChangeById(id)) showToast('已撤销导入', 'info');
+        else showToast('这一步之后又有改动，已经撤不回去了', 'warn');
+      }
     );
     if (r.warnings.length) console.warn('课表导入提示：', r.warnings);
   } catch (e) {
@@ -1388,31 +1543,47 @@ export function patchPrefs(patch: Partial<Prefs>): void {
 
 /* ------------------------------ 主题动作 ------------------------------ */
 
-export function patchTheme(patch: Partial<Theme>, silent?: boolean): void {
+/**
+ * 改外观。
+ *
+ * `historyKey` 给了就记一笔历史（同一个 key 的连续拖动会合并成一步）——
+ * 于是"不小心把壁纸模糊拉过头""主题点错了"都能一键退回。`silent` 是给
+ * 启动时的自我修复用的（那时候不该往历史里塞东西）。
+ */
+export function patchTheme(patch: Partial<Theme>, silent?: boolean, historyKey?: string): void {
   const next = Object.assign({}, state.theme, patch);
-  setState({ theme: next });
-  if (!silent) persistTheme(next);
+  if (silent) {
+    setState({ theme: next });
+    return;
+  }
+  if (historyKey) setThemeWithHistory(next, '调整外观', historyKey);
+  else {
+    setState({ theme: next });
+    persistTheme(next);
+  }
 }
 
-export function patchWallpaper(patch: Partial<Theme['wallpaper']>): void {
+export function patchWallpaper(patch: Partial<Theme['wallpaper']>, historyKey?: string): void {
   const wp = Object.assign({}, state.theme.wallpaper, patch);
-  patchTheme({ wallpaper: wp });
+  patchTheme({ wallpaper: wp }, false, historyKey || 'wallpaper');
 }
 
 export function applyPreset(id: string): void {
   const p = presetById(id);
   if (!p) return;
   const theme = p.build();
-  setState({ theme: theme });
-  persistTheme(theme);
-  showToast('已应用「' + p.name + '」', 'ok');
+  const before = state.theme.meta.id;
+  setThemeWithHistory(theme, '换主题');
+  showToast(
+    '已应用「' + p.name + '」',
+    'ok',
+    before === id ? undefined : function () { applyPreset(before); }
+  );
 }
 
 export function resetTheme(): void {
-  const t = defaultTheme();
-  setState({ theme: t });
-  persistTheme(t);
-  showToast('已恢复默认外观', 'ok');
+  setThemeWithHistory(defaultTheme(), '恢复默认外观');
+  showToast('已恢复默认外观', 'ok', function () { undo(); });
 }
 
 /**
@@ -1447,11 +1618,15 @@ export async function exportThemeNow(): Promise<void> {
 
 /** 把一个校验过的主题装上去。主题包文件和外观分享码走的是同一条路 */
 export function importThemeObject(theme: Theme, warnings?: string[]): void {
-  setState({ theme: theme });
-  persistTheme(theme);
+  /* 记一笔历史：导错了外观不用手动改回去，提示条上直接撤销 */
+  setThemeWithHistory(theme, '导入外观');
   setState({ tab: 'studio' });
   const w = warnings || [];
-  showToast('已导入外观「' + theme.meta.name + '」' + (w.length ? '（' + w.length + ' 条提示）' : ''), 'ok');
+  showToast(
+    '已导入外观「' + theme.meta.name + '」' + (w.length ? '（' + w.length + ' 条提示）' : ''),
+    'ok',
+    function () { undo(); }
+  );
   if (w.length) console.warn('外观导入提示：', w);
 }
 
@@ -1753,15 +1928,21 @@ export async function cloudRestoreNow(): Promise<void> {
     if (!ok) { setCloud({ busy: '' }); return; }
 
     const a = restoreAssets(payload);
-    /* 数据走 setData：记一笔历史，于是"恢复"这一步也能撤销 */
-    setData(payload.data, '从云端恢复', 'import');
-    /* 外观与偏好跟着一起回来（只覆盖白名单里的那几项） */
-    if (payload.theme && payload.theme.meta) {
-      const merged = Object.assign({}, state.theme, payload.theme);
-      persistTheme(merged);
-      setState({ theme: merged });
-    }
-    if (payload.prefs) patchPrefs(payload.prefs);
+    /*
+     * ★ 一次改好几样东西的操作，必须**整份文档记一笔**。
+     *
+     * 原来只把 data 记进历史，外观与偏好是另外单独写的 —— 于是撤销之后
+     * 课表退回去了、外观还是云端那份，用户看到的是"半还原"。
+     * applyDocument 把 data + theme + prefs 打包成一笔：撤销就是完整退回原样。
+     */
+    const mergedTheme = (payload.theme && payload.theme.meta)
+      ? Object.assign({}, state.theme, payload.theme)
+      : state.theme;
+    const restoreId = applyDocument(
+      { data: payload.data, theme: mergedTheme, prefs: payload.prefs || undefined },
+      '从云端恢复',
+      'import'
+    );
     setWeek(clampWeek(weekOfDate(payload.data.term, todayISO())));
     setCloud({
       busy: '',
@@ -1774,7 +1955,12 @@ export async function cloudRestoreNow(): Promise<void> {
     });
     showToast(
       '已从云端恢复：' + describeBackup(payload) + (a.skipped ? '（' + a.skipped + ' 张图片不在备份里）' : ''),
-      a.skipped ? 'warn' : 'ok'
+      a.skipped ? 'warn' : 'ok',
+      /* 提示条上直接给撤销：整份文档一起退回去（数据 + 外观 + 偏好） */
+      function () {
+        if (undoChangeById(restoreId)) showToast('已退回恢复之前的样子', 'info');
+        else showToast('这一步之后又有改动，已经撤不回去了', 'warn');
+      }
     );
   } catch (e) { cloudFail(e, '恢复失败'); }
 }
@@ -2477,9 +2663,16 @@ export async function importIcsFromFile(file: File): Promise<void> {
       showToast('没有从文件里读到任何日程' + (r.warnings.length ? '：' + r.warnings[0] : ''), 'warn');
       return;
     }
-    setData(r.data, '导入 ICS', 'import');
+    const id = setData(r.data, '导入 ICS', 'import');
     setWeek(clampWeek(weekOfDate(r.data.term, todayISO())));
-    showToast('已导入 ' + r.courses + ' 门课 / ' + r.sessions + ' 个时段' + (r.warnings.length ? '（' + r.warnings.length + ' 条提示）' : ''), 'ok');
+    showToast(
+      '已导入 ' + r.courses + ' 门课 / ' + r.sessions + ' 个时段' + (r.warnings.length ? '（' + r.warnings.length + ' 条提示）' : ''),
+      'ok',
+      function () {
+        if (id && undoChangeById(id)) showToast('已撤销导入', 'info');
+        else showToast('这一步之后又有改动，已经撤不回去了', 'warn');
+      }
+    );
     if (r.warnings.length) console.warn('ICS 导入提示：', r.warnings);
   } catch (e) {
     showToast('导入失败：' + (e as Error).message, 'error');
