@@ -77,7 +77,7 @@ RULECHECK verdict=PASS 规则数=2 未来7天排程=7 最忙一小时=1/6 走了
 
 - 单测 **717 通过 / 41 个文件**（新增 `rules.test.ts` 15 个 + host 侧规则校验 6 个）；`tsc --noEmit` 0 错误
 - 新增示例 `examples/plugin-rule-ddl.tbplugin.json`（三条规则，可直接改成自己的）
-- 版本：**1.9.15 / versionCode 76**
+- 版本：**1.9.15 / versionCode 76**；APK **9,728,059 字节**，SHA-256 `970F2F8B3CB851B23591FF402E05777577A774A5C3B5760ED931129A72ECF29C`（Supabase 与 GitHub 两份逐字节一致）；CI 全绿
 
 ---
 
