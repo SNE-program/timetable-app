@@ -8,8 +8,10 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import EXAMPLE_PLUGIN from '../../examples/plugin-teacher-contact.tbplugin.json?raw';
 import {
   HOST_API_VERSION, activeCommands, activeExports, grantPermissions, installPlugin, isPluginActive,
-  lastLoadIssues, listPlugins, parseManifest, resetPlugins, setPluginEnabled, uninstallPlugin,
+  lastLoadIssues, listPlugins, parseManifest, resetPlugins, resolveExportColumns, resolveExportFileName,
+  setPluginEnabled, settingsCapability, uninstallPlugin,
 } from './host';
+import { writeSetting } from './settings';
 
 /* Node 里没有 localStorage，用 Map 顶一个最小实现 */
 beforeEach(function () {
@@ -187,7 +189,9 @@ describe('插件宿主', function () {
     expect(r.ok).toBe(true);
     const p = listPlugins().filter(function (x) { return x.manifest.id === 'example.teacher-contact'; })[0];
     expect(p).toBeTruthy();
-    expect(p.manifest.capabilities.length).toBe(2);
+    /* 示例包现在带一个设置能力 + 两个导出能力：示例要能展示"可配置"这条路 */
+    expect(p.manifest.capabilities.length).toBe(3);
+    expect(p.manifest.capabilities.some(function (c) { return c.type === 'settings'; })).toBe(true);
     /* 装上就该能在导出菜单里看见 */
     const names = activeExports().filter(function (e) { return e.pluginId === 'example.teacher-contact'; })
       .map(function (e) { return e.capability.name; });
@@ -389,3 +393,175 @@ describe('导出范围与格式的扩展', function () {
     }
   });
 });
+
+/* ------------------------------ 设置能力 ------------------------------ */
+
+function withSettings(over: Record<string, unknown> = {}): string {
+  return pkg(Object.assign({
+    capabilities: [
+      {
+        type: 'settings', id: 'prefs', name: '导出设置',
+        fields: [
+          { key: 'columns', type: 'multi', label: '列', default: ['date', 'course'], options: ['date', 'course', 'teacher'] },
+          { key: 'fileName', type: 'text', label: '文件名', default: '我的课表' },
+        ],
+      },
+      {
+        type: 'export', id: 'e1', name: '导出', format: 'csv', scope: 'week',
+        columns: ['date', 'course'], columnsFrom: 'columns', fileNameFrom: 'fileName',
+      },
+    ],
+  }, over));
+}
+
+/** 取已安装插件的第一个导出能力（测试里反复要用） */
+function firstExport(id: string): { manifest: ReturnType<typeof listPlugins>[number]['manifest']; cap: any } {
+  const p = listPlugins().filter(function (x) { return x.manifest.id === id; })[0];
+  const cap = p.manifest.capabilities.filter(function (c) { return c.type === 'export'; })[0];
+  return { manifest: p.manifest, cap: cap };
+}
+
+const COLS_FIELD = { key: 'columns', type: 'multi' as const, label: '列', default: [], options: ['date', 'course', 'teacher'] };
+
+describe('插件设置能力', function () {
+  it('合法的设置能装上，并且能解析出用户填的值', function () {
+    const r = parseManifest(withSettings());
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(installPlugin(withSettings(), ['read:timetable']).ok).toBe(true);
+
+    const g = firstExport('test.hello');
+    /* 没改过设置：用字段的默认值 */
+    expect(resolveExportColumns(g.manifest, g.cap)).toEqual(['date', 'course']);
+    expect(resolveExportFileName(g.manifest, g.cap)).toBe('我的课表');
+
+    /* 用户在设置页勾掉一列、改了文件名：导出立刻跟着变 */
+    writeSetting('test.hello', COLS_FIELD, ['teacher']);
+    writeSetting('test.hello', { key: 'fileName', type: 'text', label: '文件名', default: '' }, '我的课表2');
+    expect(resolveExportColumns(g.manifest, g.cap)).toEqual(['teacher']);
+    expect(resolveExportFileName(g.manifest, g.cap)).toBe('我的课表2');
+  });
+
+  it('★ 列的先后按字段里 options 的顺序，不按用户勾选的先后', function () {
+    installPlugin(withSettings(), ['read:timetable']);
+    const g = firstExport('test.hello');
+    /* 故意倒着勾（先 course 后 date），导出顺序仍然应该是 date → course */
+    writeSetting('test.hello', COLS_FIELD, ['course', 'date']);
+    expect(resolveExportColumns(g.manifest, g.cap)).toEqual(['date', 'course']);
+  });
+
+  it('用户把列全取消勾选时，回落到清单里声明的那组（不会导出空表头）', function () {
+    installPlugin(withSettings(), ['read:timetable']);
+    const g = firstExport('test.hello');
+    writeSetting('test.hello', COLS_FIELD, []);
+    expect(resolveExportColumns(g.manifest, g.cap)).toEqual(['date', 'course']);
+  });
+
+  it('字段类型不认识、key 重复、默认值对不上，都会被拒', function () {
+    const bad = function (fields: unknown): string {
+      return pkg({ capabilities: [{ type: 'settings', id: 's', name: 's', fields: fields }] });
+    };
+    expect(parseManifest(bad([{ key: 'a', type: 'color', label: 'x', default: '#fff' }])).ok).toBe(false);
+    expect(parseManifest(bad([
+      { key: 'a', type: 'bool', label: 'x', default: true },
+      { key: 'a', type: 'bool', label: 'y', default: false },
+    ])).ok).toBe(false);
+    /* 开关的默认值写成字符串 */
+    expect(parseManifest(bad([{ key: 'a', type: 'bool', label: 'x', default: 'yes' }])).ok).toBe(false);
+    /* 多选的默认值里有不在 options 里的项 */
+    expect(parseManifest(bad([{ key: 'a', type: 'multi', label: 'x', default: ['z'], options: ['a'] }])).ok).toBe(false);
+    /* key 里带奇怪字符 */
+    expect(parseManifest(bad([{ key: 'a b', type: 'bool', label: 'x', default: true }])).ok).toBe(false);
+    /* 没有字段的设置能力 */
+    expect(parseManifest(bad([])).ok).toBe(false);
+  });
+
+  it('★ 安全边界：columnsFrom 指向的多选项必须全是该 scope 认得的列', function () {
+    /* course 是 week 认得的列，status 不是 —— 放行就等于"用户可以勾出不存在的列" */
+    const r = parseManifest(pkg({
+      capabilities: [
+        { type: 'settings', id: 's', name: 's', fields: [{ key: 'columns', type: 'multi', label: '列', default: [], options: ['course', 'status'] }] },
+        { type: 'export', id: 'e1', name: 'e', format: 'csv', scope: 'week', columns: ['course'], columnsFrom: 'columns' },
+      ],
+    }));
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.error).toContain('不属于它');
+  });
+
+  it('columnsFrom / fileNameFrom 指向不存在或类型不对的字段时拒绝', function () {
+    const two = function (columnsFrom?: string, fileNameFrom?: string): string {
+      return pkg({
+        capabilities: [
+          {
+            type: 'settings', id: 's', name: 's',
+            fields: [
+              { key: 'columns', type: 'multi', label: '列', default: ['date'], options: ['date'] },
+              { key: 'flag', type: 'bool', label: '开关', default: true },
+              { key: 'fileName', type: 'text', label: '名字', default: 'x' },
+            ],
+          },
+          Object.assign(
+            { type: 'export', id: 'e1', name: 'e', format: 'csv', scope: 'week', columns: ['date'] },
+            columnsFrom ? { columnsFrom: columnsFrom } : {},
+            fileNameFrom ? { fileNameFrom: fileNameFrom } : {}
+          ),
+        ],
+      });
+    };
+    expect(parseManifest(two('nope')).ok).toBe(false);
+    expect(parseManifest(two('flag')).ok).toBe(false);            /* 不是 multi */
+    expect(parseManifest(two(undefined, 'flag')).ok).toBe(false); /* 不是 text */
+    expect(parseManifest(two(undefined, 'nope')).ok).toBe(false);
+    expect(parseManifest(two('columns', 'fileName')).ok).toBe(true);
+  });
+
+  it('设置能力不需要权限，也不会因为没声明权限被拒', function () {
+    const r = parseManifest(pkg({
+      permissions: ['read:timetable'],
+      capabilities: [
+        { type: 'settings', id: 's', name: 's', fields: [{ key: 'a', type: 'bool', label: 'x', default: false }] },
+        { type: 'export', id: 'e1', name: 'e', format: 'csv', scope: 'week', columns: ['date'] },
+      ],
+    }));
+    expect(r.ok).toBe(true);
+  });
+
+  it('内置的「当前周 CSV」自己就用了设置（吃自己的狗粮）', function () {
+    const p = listPlugins().filter(function (x) { return x.manifest.id === 'builtin.csv-week'; })[0];
+    const s = settingsCapability(p.manifest);
+    expect(s).toBeTruthy();
+    const g = firstExport('builtin.csv-week');
+    expect(g.cap.columnsFrom).toBe('columns');
+    expect(g.cap.fileNameFrom).toBe('fileName');
+    /* 默认值和声明列一致（内置插件的开箱即用行为不该被改掉） */
+    expect(resolveExportColumns(g.manifest, g.cap)).toEqual(g.cap.columns);
+    expect(resolveExportFileName(g.manifest, g.cap)).toBe('本周课表');
+  });
+
+  it('卸载插件会把它设置也一起删掉（不留清不掉的残留）', function () {
+    installPlugin(withSettings(), ['read:timetable']);
+    writeSetting('test.hello', COLS_FIELD, ['teacher']);
+    expect(localStorage.getItem('timetable.pluginsettings.v1')).toContain('teacher');
+    uninstallPlugin('test.hello');
+    expect(localStorage.getItem('timetable.pluginsettings.v1')).not.toContain('teacher');
+  });
+});
+
+describe('接口版本的兼容', function () {
+  it('按旧接口（v1，或压根没写）写的插件仍然照常工作', function () {
+    const old = pkg();                    /* 没有 apiVersion 字段 */
+    expect(parseManifest(old).ok).toBe(true);
+    expect(installPlugin(old, ['read:timetable']).ok).toBe(true);
+    expect(activeExports().some(function (e) { return e.pluginId === 'test.hello'; })).toBe(true);
+  });
+
+  it('宿主接口版本已经是 2；按 v3 写的插件装不上并说清原因', function () {
+    expect(HOST_API_VERSION).toBe(2);
+    const r = parseManifest(pkg({ apiVersion: HOST_API_VERSION + 1 }));
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.error).toContain('v' + HOST_API_VERSION);
+  });
+});
+

@@ -26,7 +26,11 @@ import { parseThemeFile, themeFileText, validateTheme } from '../theme/themeFile
 import { announceChange } from './reminderRuntime';
 import { deleteAsset, getAsset, kvDelete, kvGetSync, kvSet, putAsset } from '../storage';
 import { extractAssets, hydrateAssets } from '../storage/assetRef';
-import { activeCommands, activeExports, resetPlugins, type ActiveCommand, type ActiveExport } from '../plugins/host';
+import {
+  activeCommands, activeExports, resetPlugins, resolveExportColumns, resolveExportFileName,
+  type ActiveCommand, type ActiveExport,
+} from '../plugins/host';
+import { settingsStorageKey as pluginsSettingsKey } from '../plugins/settings';
 import { reloadPluginCommands } from './builtinCommands';
 import {
   FORMAT_EXT, courseRows, currentWeek, exportFileName, renderExport, rowsForScope, termRows, toGroupedMarkdown,
@@ -3071,7 +3075,7 @@ export function clearPluginData(): void {
   resetPlugins();
   reloadPluginCommands();
   patchPrefs({ pluginDataAt: Date.now() });
-  showToast('已清掉插件数据：安装记录、停用状态与授权都没了（内置导出格式不受影响）', 'ok');
+  showToast('已清掉插件数据：安装记录、授权、以及各插件的设置都没了（内置导出格式不受影响）', 'ok');
 }
 
 /** 插件数据有没有被清过（设置页据此显示"清掉于 …"） */
@@ -3107,6 +3111,13 @@ export async function runPluginExport(pluginId: string, capabilityId: string): P
   if (!hit) { showToast('这个导出格式已经不可用了', 'warn'); return; }
 
   const cap = hit.capability;
+  /*
+   * 列与文件名可能来自**用户在插件设置里填的值**（见 plugins/host.ts 的 resolve*）。
+   * 放在这里解析而不是让插件去算：插件是纯数据，它没有"读设置"的能力 ——
+   * 那正是"装插件不能让应用做新的事"这条约束的样子。
+   */
+  const cols = resolveExportColumns(hit.manifest, cap);
+  const nameFromSetting = resolveExportFileName(hit.manifest, cap);
   try {
     const termName = state.data.term.name || '我的课表';
     /*
@@ -3114,7 +3125,7 @@ export async function runPluginExport(pluginId: string, capabilityId: string): P
      * 以前这里是一串 if/else 手写每种组合（csv / markdown 各一份），
      * 于是每加一种范围或格式就要改三处，而"插件导出的"和"内置导出的"也容易走偏。
      */
-    const rows = rowsForScope(state.data, cap.scope, cap.columns, state.week);
+    const rows = rowsForScope(state.data, cap.scope, cols, state.week);
     const scopeTitle = cap.scope === 'week' ? termName + ' 第 ' + state.week + ' 周'
       : cap.scope === 'day' ? termName + ' · 今天'
         : cap.scope === 'courses' ? termName + ' 课程清单'
@@ -3124,12 +3135,12 @@ export async function runPluginExport(pluginId: string, capabilityId: string): P
     /* 课程清单 + markdown + grouped：按课程分小节的版式更好读 */
     const text = (cap.scope === 'courses' && cap.format === 'markdown' && cap.grouped)
       ? toGroupedMarkdown(state.data)
-      : renderExport(rows, cap.columns, cap.format, scopeTitle);
+      : renderExport(rows, cols, cap.format, scopeTitle);
     const ext = FORMAT_EXT[cap.format];
     const mime = cap.format === 'csv' ? 'text/csv;charset=utf-8'
       : cap.format === 'json' ? 'application/json;charset=utf-8'
         : 'text/plain;charset=utf-8';
-    const base = cap.fileName || (termName + (cap.scope === 'week' ? '-第' + state.week + '周' : ''));
+    const base = nameFromSetting || (termName + (cap.scope === 'week' ? '-第' + state.week + '周' : ''));
 
     setState({ exportSheet: false });
     if (rows.length === 0) {
@@ -3173,8 +3184,10 @@ export function storageUsage(): { items: StorageUsage[]; total: number; limit: n
     ['timetable.devicecheck.v1', '检查进度'],
     /* 插件注册表：装过插件才会占地方，但用户以前既看不到也清不掉 */
     ['timetable.plugins.v1', '插件'],
-    /* 插件注册表：装过插件才会占地方，但用户以前既看不到也清不掉 */
-    ['timetable.plugins.v1', '插件'],
+    /* 插件自己的设置（v1.9.13 起）：同样要被看到、被清掉 */
+    [pluginsSettingsKey(), '插件设置'],
+    /* 本机角色库的索引（只有几 KB，素材在资产库里） */
+    ['timetable.mascotlib.v1', '本机角色库'],
   ];
   const items: StorageUsage[] = [];
   let total = 0;

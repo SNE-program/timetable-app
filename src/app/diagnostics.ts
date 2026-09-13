@@ -747,6 +747,102 @@ function runTodayCancelCheck(send: (text: string) => void): void {
 }
 
 /**
+ * 插件设置的自检（?plugcheck=1）。
+ *
+ * 这条检查回答的问题：**用户在设置页勾的那几下，真的改变了导出的结果吗？**
+ *
+ * 这是"可配置"整套设计里最容易假成功的一环：勾选框渲染出来了、值也存进去了，
+ * 但导出时读的是另一份数据（或者读的是缓存），界面看着一切正常，
+ * 导出的文件却还是老样子。所以这里不看代码，只做端到端：
+ *
+ *   1. 找到内置插件「当前周 CSV」的设置表单，记下"这次导出会用哪些列"；
+ *   2. 把其中一列的勾去掉（合成一次点击）；
+ *   3. 看那行结果**有没有跟着变**；
+ *   4. 点「恢复默认」，看它有没有变回去。
+ *
+ * 全程只碰 DOM 与存储，走的正是用户会走的那条路。
+ */
+function runPluginCheck(): void {
+  let send = function (_text: string): void { /* 默认不回传 */ };
+  try { send = makeReporter(new URLSearchParams(window.location.search).get('report') || ''); } catch (e) { /* 忽略 */ }
+  setTimeout(function () {
+    const cards = document.querySelectorAll('.plugin-card');
+    if (cards.length === 0) { send('PLUGCHECK 没有插件卡片（要在设置页且面板展开）'); return; }
+    const card = cards[0] as HTMLElement;
+    const outcomeOf = function (): string {
+      const el = card.querySelector('.plugin-outcome');
+      return el ? (el.textContent || '').trim() : '';
+    };
+    /** 每次重新取一次节点：React 重渲染之后旧引用不该再被信任 */
+    const optionAt = function (i: number): HTMLElement | null {
+      const list = card.querySelectorAll('.plugin-settings .plugin-perm');
+      return (list[i] as HTMLElement) || null;
+    };
+    /*
+     * ★ 每次点击之后必须**等一帧**再读。
+     *
+     * 第一版这里是同步读的，于是永远得到"点完没变化"—— 而那不是应用的 bug，
+     * 是 React 的更新是异步的（点击 → 事件处理 → 状态更新 → 重渲染）。
+     * 这条教训值得留在代码里：**自检里的等待不是拖延，是测量的一部分**。
+     */
+    const wait = function (ms: number): Promise<void> {
+      return new Promise(function (r) { window.setTimeout(r, ms); });
+    };
+
+    const run = async function (): Promise<void> {
+      const before = outcomeOf();
+      const count = card.querySelectorAll('.plugin-settings .plugin-perm').length;
+      if (!before || count === 0) {
+        send('PLUGCHECK 第一个插件没有设置表单（用法：?tab=settings&expand=1&plugcheck=1）');
+        return;
+      }
+      const first = optionAt(count - 1);
+      const wasOn = !!first && !!first.querySelector('.task-check.on');
+
+      /* ① 点掉一列 */
+      if (first) first.click();
+      await wait(160);
+      const uncheckStillOn = !!optionAt(count - 1)?.querySelector('.task-check.on');
+      const afterUncheck = outcomeOf();
+      let stored = '';
+      try { stored = String(localStorage.getItem('timetable.pluginsettings.v1') || ''); } catch (e) { stored = '(读不到)'; }
+      const wroteSetting = stored.indexOf('builtin.csv-week') >= 0;
+
+      /* ② 再点回来 */
+      const again = optionAt(count - 1);
+      if (again) again.click();
+      await wait(160);
+      const afterRecheck = outcomeOf();
+
+      /* ③ 改一下再点「恢复默认」 */
+      const third = optionAt(count - 1);
+      if (third) third.click();
+      await wait(160);
+      const changedAgain = outcomeOf() !== before;
+      const resetBtn = card.querySelector('.plugin-field-actions .btn') as HTMLElement | null;
+      if (resetBtn) resetBtn.click();
+      await wait(160);
+      const afterReset = outcomeOf();
+
+      const changed = afterUncheck !== before;
+      const restored = afterRecheck === before;
+      const defaulted = afterReset === before;
+      const pass = changed && restored && defaulted && !uncheckStillOn && wroteSetting;
+      send('PLUGCHECK verdict=' + (pass ? 'PASS' : 'FAIL')
+        + ' 选项数=' + count + ' 原本勾着=' + (wasOn ? 'yes' : 'no')
+        + ' 勾选态跟着变=' + (uncheckStillOn ? 'no' : 'yes') + ' 存进去了=' + (wroteSetting ? 'yes' : 'no')
+        + ' 改动生效=' + (changed ? 'yes' : 'no')
+        + ' 再勾回来一致=' + (restored ? 'yes' : 'no')
+        + ' 恢复默认前确实被改过=' + (changedAgain ? 'yes' : 'no')
+        + ' 恢复默认一致=' + (defaulted ? 'yes' : 'no')
+        + ' | 前「' + before + '」后「' + afterUncheck + '」');
+    };
+    /* 自检自己抛异常时必须说出来 —— 静默的检查比没有检查更坏（看起来像通过了） */
+    run().catch(function (e) { send('PLUGCHECK 自检自身出错：' + String(e && (e as Error).message || e)); });
+  }, 1500);
+}
+
+/**
  * 小组件尺寸预览的自检（?wp=1）。
  *
  * 那个预览面板只在 **Android 版**渲染（网页版没有桌面小组件），
@@ -1040,6 +1136,7 @@ export function runDiagnostics(): void {
   if (params.get('ovcheck') === '1') runOverrideCheck();
   if (params.get('wp') === '1') runWidgetPreviewCheck();
   if (params.get('dragcheck') === '1') runDragCheck();
+  if (params.get('plugcheck') === '1') runPluginCheck();
   if (params.get('clipcheck') === '1') runClipCheck();
   if (params.get('behavecheck')) {
     const sec = Number(params.get('behavecheck'));

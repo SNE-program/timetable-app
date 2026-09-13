@@ -8,6 +8,12 @@ import type { PluginManifest } from './types';
  * 而不是等第三方来踩。
  *
  * 内置插件在设置页里和第三方插件并排显示，可以停用，但不能卸载。
+ *
+ * ## 第一个内置插件带上了"设置"（v1.9.13）
+ *
+ * 这不是为了好看：**接口设计得不好用，自己第一个就会踩到**。
+ * 让内置的「当前周 CSV」吃自己那套设置能力（选列 + 文件名），
+ * 于是"字段够不够表达真实需求""表单排得下吗"这类问题在发版前就暴露了。
  */
 export const BUILTIN_PLUGINS: PluginManifest[] = [
   {
@@ -17,9 +23,38 @@ export const BUILTIN_PLUGINS: PluginManifest[] = [
     name: '当前周 CSV',
     author: '内置',
     pluginVersion: '1.0.0',
-    description: '把本周课表导成 CSV 表格，Excel、WPS、Numbers 都能直接打开。',
+    description: '把本周课表导成 CSV 表格，Excel、WPS、Numbers 都能直接打开。可在下面自己选要哪些列。',
     permissions: ['read:timetable'],
     capabilities: [
+      {
+        type: 'settings',
+        id: 'csv-week-prefs',
+        name: '导出哪些列',
+        hint: '改完立刻生效，不必重新安装插件；「恢复默认」可以随时回到这一组。',
+        fields: [
+          {
+            key: 'columns',
+            type: 'multi',
+            label: '要导出的列',
+            hint: '顺序固定，不按勾选先后',
+            /*
+             * 默认值与下面 export 里声明的 columns **完全一致** ——
+             * 内置插件是"开箱即用"的东西：加了设置之后，什么都没改的用户
+             * 导出来的文件必须和以前一模一样，否则这叫回归，不叫新功能。
+             */
+            default: ['date', 'weekday', 'period', 'start', 'end', 'course', 'teacher', 'location'],
+            options: ['date', 'weekday', 'period', 'start', 'end', 'course', 'teacher', 'location'],
+          },
+          {
+            key: 'fileName',
+            type: 'text',
+            label: '文件名',
+            hint: '会自动接上 .csv；留空就用默认名',
+            default: '本周课表',
+            maxLength: 40,
+          },
+        ],
+      },
       {
         type: 'export',
         id: 'csv-week',
@@ -28,6 +63,9 @@ export const BUILTIN_PLUGINS: PluginManifest[] = [
         format: 'csv',
         scope: 'week',
         columns: ['date', 'weekday', 'period', 'start', 'end', 'course', 'teacher', 'location'],
+        /* 这两行就是"插件可配置"的全部：列与文件名改从用户设置里取 */
+        columnsFrom: 'columns',
+        fileNameFrom: 'fileName',
       },
     ],
   },

@@ -1,13 +1,38 @@
 {
   "format": "timetable-plugin",
   "version": 1,
+  "apiVersion": 2,
   "id": "example.teacher-contact",
   "name": "教师联系方式表",
   "author": "示例",
-  "pluginVersion": "1.0.0",
+  "pluginVersion": "1.1.0",
   "description": "把课程、任课教师和上课地点整理成一张表，方便按老师找人或者按教室找课。适合开学时打印一份贴墙上。",
   "permissions": ["read:timetable"],
   "capabilities": [
+    {
+      "type": "settings",
+      "id": "prefs",
+      "name": "这张表要哪些列",
+      "hint": "勾选后点导出即可，改完立刻生效，不用重新导入插件。",
+      "fields": [
+        {
+          "key": "columns",
+          "type": "multi",
+          "label": "要导出的列",
+          "hint": "顺序按这里的排列，不按勾选先后",
+          "default": ["course", "teacher", "location", "period"],
+          "options": ["course", "teacher", "location", "period", "note"]
+        },
+        {
+          "key": "fileName",
+          "type": "text",
+          "label": "文件名",
+          "default": "教师联系方式",
+          "maxLength": 40,
+          "placeholder": "例如：教师联系方式"
+        }
+      ]
+    },
     {
       "type": "export",
       "id": "teacher-contact-csv",
@@ -15,7 +40,9 @@
       "hint": "一门课一行：课程、教师、用到的教室、上课时段",
       "format": "csv",
       "scope": "courses",
-      "columns": ["course", "teacher", "location", "period", "note"]
+      "columns": ["course", "teacher", "location", "period", "note"],
+      "columnsFrom": "columns",
+      "fileNameFrom": "fileName"
     },
     {
       "type": "export",

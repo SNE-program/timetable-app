@@ -3,17 +3,167 @@ import { Panel } from './common';
 import { showToast } from '../app/store';
 import {
   HOST_API_VERSION, grantPermissions, installPlugin, lastLoadIssues, listPlugins, parseManifest,
-  setPluginEnabled, uninstallPlugin,
+  resolveExportColumns, resolveExportFileName, setPluginEnabled, settingsCapability, uninstallPlugin,
 } from '../plugins/host';
-import { PERMISSION_LABEL, type InstalledPlugin, type PluginPermission } from '../plugins/types';
+import {
+  PERMISSION_LABEL, type InstalledPlugin, type PluginPermission, type SettingField, type SettingValue,
+} from '../plugins/types';
+import { readSettings, resetSettings, writeSetting } from '../plugins/settings';
 import { APP_VERSION } from '../app/version';
 import { reloadPluginCommands } from '../app/builtinCommands';
-import { SCOPE_LABEL } from '../core/exporters';
+import { COLUMN_LABEL, SCOPE_LABEL, type ExportColumn } from '../core/exporters';
 
 /** 格式的中文名（插件面板上显示用） */
 const FORMAT_LABEL: Record<string, string> = {
   csv: 'CSV 表格', markdown: 'Markdown', json: 'JSON', text: '纯文本',
 };
+
+/**
+ * 一个插件的设置表单。
+ *
+ * 渲染**全部由宿主负责**：插件只声明字段，控件、校验、存储都是应用自己的东西。
+ * 这样插件不可能做出"一个看起来像系统弹窗的输入框"这种事 ——
+ * 而这正是"插件是纯数据"能兑现的界面层承诺。
+ */
+function PluginSettings(props: {
+  plugin: InstalledPlugin;
+  /** 值变了之后让外层重算（导出预览要跟着变） */
+  onChange: () => void;
+}) {
+  const cap = settingsCapability(props.plugin.manifest);
+  /*
+   * 停用或未授权时**不显示表单**：插件此刻不生效，让用户去改一组不起作用的参数
+   * 只会制造"我改了怎么没反应"。
+   */
+  if (!cap) return null;
+  const values = readSettings(props.plugin.manifest.id, cap);
+
+  function set(f: SettingField, v: SettingValue): void {
+    if (writeSetting(props.plugin.manifest.id, f, v)) props.onChange();
+  }
+
+  return (
+    <div className="plugin-settings">
+      <div className="plugin-settings-title">{cap.name || '设置'}</div>
+      {cap.hint ? <div className="plugin-desc">{cap.hint}</div> : null}
+      {cap.fields.map(function (f) {
+        const v = values[f.key];
+        if (f.type === 'bool') {
+          return (
+            <div className="plugin-field" key={f.key}>
+              <div className="plugin-field-text">
+                <div className="plugin-field-label">{f.label}</div>
+                {f.hint ? <div className="plugin-field-hint">{f.hint}</div> : null}
+              </div>
+              <div className={v ? 'switch on' : 'switch'} onClick={function () { set(f, !v); }} />
+            </div>
+          );
+        }
+        if (f.type === 'text') {
+          return (
+            <div className="plugin-field column" key={f.key}>
+              <div className="plugin-field-text">
+                <div className="plugin-field-label">{f.label}</div>
+                {f.hint ? <div className="plugin-field-hint">{f.hint}</div> : null}
+              </div>
+              <input
+                className="input"
+                value={String(v)}
+                placeholder={f.placeholder}
+                maxLength={f.maxLength || 200}
+                onChange={function (e) { set(f, e.target.value); }}
+              />
+            </div>
+          );
+        }
+        if (f.type === 'number') {
+          return (
+            <div className="plugin-field column" key={f.key}>
+              <div className="plugin-field-text">
+                <div className="plugin-field-label">{f.label}</div>
+                {f.hint ? <div className="plugin-field-hint">{f.hint}</div> : null}
+              </div>
+              <input
+                className="input" type="number" value={Number(v)}
+                min={f.min} max={f.max} step={f.step}
+                onChange={function (e) {
+                  const n = Number(e.target.value);
+                  if (isFinite(n)) set(f, n);
+                }}
+              />
+            </div>
+          );
+        }
+        /* multi：一行一项的勾选，和权限那一排同一种控件（用户不用学第二套） */
+        const picked = Array.isArray(v) ? v : [];
+        return (
+          <div className="plugin-field column" key={f.key}>
+            <div className="plugin-field-text">
+              <div className="plugin-field-label">{f.label}</div>
+              <div className="plugin-field-hint">
+                {f.hint || '勾选的会按这里的顺序出现在导出里'}
+                {f.max ? '（最多 ' + f.max + ' 项）' : ''}
+              </div>
+            </div>
+            <div className="plugin-perms">
+              {f.options.map(function (opt) {
+                const on = picked.indexOf(opt) >= 0;
+                /* 选项是列 id 时显示中文列名；不是列（插件自定义的键）就原样显示 */
+                const text = (COLUMN_LABEL as Record<string, string>)[opt] || opt;
+                return (
+                  <div
+                    className="plugin-perm" key={opt}
+                    onClick={function () {
+                      if (on) set(f, picked.filter(function (x) { return x !== opt; }));
+                      else if (!f.max || picked.length < f.max) set(f, picked.concat([opt]));
+                    }}
+                  >
+                    <span className={on ? 'task-check on' : 'task-check'} style={{ width: 18, height: 18 }}>
+                      {on ? '✓' : ''}
+                    </span>
+                    <span className="plugin-perm-text">{text}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+      <div className="plugin-field-actions">
+        <button
+          className="btn sm ghost"
+          onClick={function () {
+            resetSettings(props.plugin.manifest.id);
+            props.onChange();
+          }}
+        >恢复默认</button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * "这次导出会怎么做" —— 把设置的结果**当场算出来给用户看**。
+ *
+ * 为什么要有它：设置里的勾选与"导出成什么样"之间隔着一段逻辑（哪几列、什么文件名），
+ * 光看勾选框用户判断不了自己改对了没有。这里直接显示最终结果，
+ * 顺带也是这套功能的**自证**：显示的和导出的必须是同一个函数算出来的。
+ */
+function ExportOutcome(props: { plugin: InstalledPlugin }) {
+  const rows = props.plugin.manifest.capabilities.filter(function (c) { return c.type === 'export'; });
+  const cap = rows[0];
+  if (!cap || cap.type !== 'export') return null;
+  if (!cap.columnsFrom && !cap.fileNameFrom) return null;
+  const cols = resolveExportColumns(props.plugin.manifest, cap);
+  const name = resolveExportFileName(props.plugin.manifest, cap);
+  return (
+    <div className="plugin-outcome">
+      这次导出会用：
+      {cols.map(function (c) { return (COLUMN_LABEL as Record<string, string>)[c as ExportColumn] || c; }).join(' · ')}
+      {name ? '，文件名 ' + name : ''}
+    </div>
+  );
+}
 
 /**
  * 插件管理。
@@ -148,12 +298,20 @@ export default function PluginsPanel() {
                  * 能力的标签要把"导出什么、导成什么"说全：
                  * 只看名字（"导出本周"）看不出它是 CSV 还是 JSON、是课表还是任务清单。
                  */
+                if (c.type === 'settings') return <span className="chip" key={c.id}>设置 · {c.name}</span>;
                 if (c.type !== 'export') return <span className="chip" key={c.id}>命令 · {c.name}</span>;
                 const fmt = FORMAT_LABEL[c.format] || c.format;
                 const scope = SCOPE_LABEL[c.scope] || c.scope;
                 return <span className="chip" key={c.id}>{fmt} · {scope} · {c.name}</span>;
               })}
             </div>
+
+            {/*
+               * 设置表单只在插件真的生效时出现 —— 停用/未授权时改参数没有任何意义，
+               * 显示出来只会让人以为"改了没反应"。
+             */}
+            {active ? <PluginSettings plugin={p} onChange={refresh} /> : null}
+            {active ? <ExportOutcome plugin={p} /> : null}
 
             {!p.builtin ? (
               <button

@@ -1,7 +1,9 @@
 import {
   CAPABILITY_PERMISSION, type Capability, type CommandCapability, type ExportCapability,
-  type InstalledPlugin, type PluginManifest, type PluginPermission,
+  type InstalledPlugin, type PluginManifest, type PluginPermission, type SettingField,
+  type SettingsCapability,
 } from './types';
+import { clearAllSettings, maxFields, maxOptions, maxTextLength, readSettings, resetSettings } from './settings';
 import { COLUMN_LABEL, SCOPE_COLUMNS, type ExportColumn, type ExportFormat, type ExportScope } from '../core/exporters';
 import { BUILTIN_PLUGINS } from './builtin';
 
@@ -20,7 +22,7 @@ const KEY = 'timetable.plugins.v1';
  * 加一条新的能力类型、或改动已有能力的含义时，把它 +1 ——
  * 于是一份"按新版写的"插件不会装进旧版应用里（装进去只会表现得莫名其妙）。
  */
-export const HOST_API_VERSION = 1;
+export const HOST_API_VERSION = 2;
 
 interface Stored {
   /** 非内置插件 */
@@ -142,12 +144,14 @@ export function validateManifest(raw: unknown): ParseResult {
   const caps = Array.isArray(m.capabilities) ? m.capabilities : [];
   if (caps.length === 0) return { ok: false, error: '插件至少要提供一个能力' };
   if (caps.length > 8) return { ok: false, error: '一个插件的能数量上限是 8 个' };
+  /* 设置项要按 key 被导出能力引用，所以得跨能力收集 */
+  const settingFields: Record<string, SettingField> = {};
 
   const seen = new Set<string>();
   const outCaps: Capability[] = [];
   for (const c of caps) {
     const cap = c as Record<string, unknown>;
-    if (cap.type !== 'export' && cap.type !== 'command') {
+    if (cap.type !== 'export' && cap.type !== 'command' && cap.type !== 'settings') {
       return { ok: false, error: '不支持的能力类型：' + String(cap.type) };
     }
     if (typeof cap.id !== 'string' || !cap.id) return { ok: false, error: '能力缺少 id' };
@@ -181,6 +185,95 @@ export function validateManifest(raw: unknown): ParseResult {
         action: { kind: 'export', capabilityId: act.capabilityId },
         keys: keys.length > 0 ? (keys as string[]) : undefined,
       });
+      continue;
+    }
+
+    /* ---------------- 设置：插件的参数由用户填，宿主渲染表单 --------------- */
+    if (cap.type === 'settings') {
+      const fields = Array.isArray(cap.fields) ? cap.fields : [];
+      if (fields.length === 0) return { ok: false, error: '设置能力 ' + cap.id + ' 至少要有一个字段' };
+      if (fields.length > maxFields()) {
+        return { ok: false, error: '设置能力 ' + cap.id + ' 的字段上限是 ' + maxFields() + ' 个' };
+      }
+      const out: SettingField[] = [];
+      for (const raw of fields) {
+        const f = raw as Record<string, unknown>;
+        if (typeof f.key !== 'string' || !/^[a-z][a-z0-9_]{0,31}$/i.test(f.key)) {
+          return { ok: false, error: '设置项 key 只能由字母数字下划线组成，且以字母开头：' + String(f.key) };
+        }
+        if (settingFields[f.key]) return { ok: false, error: '设置项 key 重复：' + f.key };
+        if (typeof f.label !== 'string' || !f.label.trim()) {
+          return { ok: false, error: '设置项 ' + f.key + ' 缺少 label' };
+        }
+        const label = f.label.trim().slice(0, 24);
+        const hint = typeof f.hint === 'string' && f.hint.trim() ? f.hint.trim().slice(0, 60) : undefined;
+
+        if (f.type === 'bool') {
+          if (typeof f.default !== 'boolean') return { ok: false, error: '开关 ' + f.key + ' 的 default 必须是 true / false' };
+          const field: SettingField = { key: f.key, type: 'bool', label: label, hint: hint, default: f.default };
+          settingFields[f.key] = field;
+          out.push(field);
+          continue;
+        }
+        if (f.type === 'text') {
+          if (typeof f.default !== 'string') return { ok: false, error: '文本项 ' + f.key + ' 的 default 必须是字符串' };
+          const maxLength = typeof f.maxLength === 'number' && isFinite(f.maxLength)
+            ? Math.max(1, Math.min(maxTextLength(), Math.round(f.maxLength))) : undefined;
+          const field: SettingField = {
+            key: f.key, type: 'text', label: label, hint: hint,
+            default: f.default.slice(0, maxLength || maxTextLength()),
+            maxLength: maxLength,
+            placeholder: typeof f.placeholder === 'string' ? f.placeholder.slice(0, 40) : undefined,
+          };
+          settingFields[f.key] = field;
+          out.push(field);
+          continue;
+        }
+        if (f.type === 'number') {
+          if (typeof f.default !== 'number' || !isFinite(f.default)) {
+            return { ok: false, error: '数字项 ' + f.key + ' 的 default 必须是数字' };
+          }
+          const num = function (v: unknown): number | undefined {
+            return typeof v === 'number' && isFinite(v) ? v : undefined;
+          };
+          const min = num(f.min);
+          const max = num(f.max);
+          if (min !== undefined && max !== undefined && min > max) {
+            return { ok: false, error: '数字项 ' + f.key + ' 的 min 比 max 大' };
+          }
+          const field: SettingField = {
+            key: f.key, type: 'number', label: label, hint: hint, default: f.default,
+            min: min, max: max, step: num(f.step),
+          };
+          settingFields[f.key] = field;
+          out.push(field);
+          continue;
+        }
+        if (f.type === 'multi') {
+          const options = Array.isArray(f.options) ? f.options.filter(function (x) { return typeof x === 'string' && x; }) as string[] : [];
+          if (options.length === 0) return { ok: false, error: '多选项 ' + f.key + ' 至少要有一个 options' };
+          if (options.length > maxOptions()) {
+            return { ok: false, error: '多选项 ' + f.key + ' 的 options 上限是 ' + maxOptions() + ' 个' };
+          }
+          if (new Set(options).size !== options.length) return { ok: false, error: '多选项 ' + f.key + ' 的 options 有重复' };
+          const def = Array.isArray(f.default) ? f.default.filter(function (x) { return typeof x === 'string'; }) as string[] : null;
+          if (!def) return { ok: false, error: '多选项 ' + f.key + ' 的 default 必须是字符串数组' };
+          for (const d of def) {
+            if (options.indexOf(d) < 0) return { ok: false, error: '多选项 ' + f.key + ' 的默认值里有不在 options 里的项：' + d };
+          }
+          const max = typeof f.max === 'number' && isFinite(f.max)
+            ? Math.max(1, Math.min(options.length, Math.round(f.max))) : undefined;
+          const field: SettingField = {
+            key: f.key, type: 'multi', label: label, hint: hint,
+            default: def.slice(0, max || options.length), options: options, max: max,
+          };
+          settingFields[f.key] = field;
+          out.push(field);
+          continue;
+        }
+        return { ok: false, error: '设置项 ' + f.key + ' 的类型只能是 bool / text / number / multi' };
+      }
+      outCaps.push({ type: 'settings', id: cap.id, name: cap.name, hint: typeof cap.hint === 'string' ? cap.hint : undefined, fields: out });
       continue;
     }
 
@@ -226,6 +319,9 @@ export function validateManifest(raw: unknown): ParseResult {
       fileName: typeof cap.fileName === 'string' && cap.fileName.trim() ? cap.fileName.trim().slice(0, 60) : undefined,
       columns: cols as ExportColumn[],
       grouped: cap.grouped === true,
+      /* 指向设置项的引用在下面第二轮核对 */
+      columnsFrom: typeof cap.columnsFrom === 'string' ? cap.columnsFrom : undefined,
+      fileNameFrom: typeof cap.fileNameFrom === 'string' ? cap.fileNameFrom : undefined,
     });
   }
 
@@ -238,6 +334,40 @@ export function validateManifest(raw: unknown): ParseResult {
     }
     if (target.type !== 'export') {
       return { ok: false, error: '命令 ' + c.id + ' 只能指向导出能力（' + c.action.capabilityId + ' 不是）' };
+    }
+  }
+
+  /*
+   * 第二轮（续）：导出能力引用的**设置项**必须存在、类型对得上、而且不会越界。
+   *
+   * 这里是整个"可配置"设计的安全边界：用户能在界面上勾的东西，
+   * 最终会变成"导出哪些列" —— 所以字段的可选项必须在**安装时**就被钉死在
+   * "这个 scope 认得的列"里，而不是等用户勾完了再检查。
+   * 于是无论用户怎么勾，导出的列都不可能越界。
+   */
+  for (const c of outCaps) {
+    if (c.type !== 'export') continue;
+    if (c.columnsFrom !== undefined) {
+      const f = settingFields[c.columnsFrom];
+      if (!f) return { ok: false, error: '导出 ' + c.id + ' 的 columnsFrom 指向的设置项不存在：' + c.columnsFrom };
+      if (f.type !== 'multi') return { ok: false, error: '导出 ' + c.id + ' 的 columnsFrom 必须指向 multi 类型的设置项' };
+      const allowedCols = SCOPE_COLUMNS[c.scope] || [];
+      for (const opt of f.options) {
+        if (VALID_COLUMNS.indexOf(opt as ExportColumn) < 0) {
+          return { ok: false, error: '导出 ' + c.id + ' 的可选列里有不认识的列：' + opt };
+        }
+        if (allowedCols.indexOf(opt as ExportColumn) < 0) {
+          return {
+            ok: false,
+            error: '导出 ' + c.id + ' 是「' + c.scope + '」范围，可选列里的「' + opt + '」不属于它（可用：' + allowedCols.join(' / ') + '）',
+          };
+        }
+      }
+    }
+    if (c.fileNameFrom !== undefined) {
+      const f = settingFields[c.fileNameFrom];
+      if (!f) return { ok: false, error: '导出 ' + c.id + ' 的 fileNameFrom 指向的设置项不存在：' + c.fileNameFrom };
+      if (f.type !== 'text') return { ok: false, error: '导出 ' + c.id + ' 的 fileNameFrom 必须指向 text 类型的设置项' };
     }
   }
 
@@ -310,6 +440,13 @@ export function uninstallPlugin(id: string): void {
   s.disabled = s.disabled.filter(function (x) { return x !== id; });
   delete s.granted[id];
   save(s);
+  /*
+   * 设置也一起删掉。
+   *
+   * 不删的话它会变成"清不掉的残留"：插件卸了，用户在存储体检里仍然看到
+   * 那几 KB，而且下次装回同一个 id 会神秘地沿用上次的值 —— 用户以为重装是干净的。
+   */
+  resetSettings(id);
 }
 
 export function setPluginEnabled(id: string, on: boolean): void {
@@ -339,6 +476,14 @@ export interface ActiveExport {
   pluginId: string;
   pluginName: string;
   capability: ExportCapability;
+  /**
+   * 插件清单本身。
+   *
+   * 带上它是因为"这次导出到底用哪几列、叫什么名字"要读**用户设置**，
+   * 而设置是挂在清单上的（见 resolveExportColumns）。让调用方再按 id 去
+   * 注册表里找一遍，等于把同一份数据查两次，两处还可能查到不同的状态。
+   */
+  manifest: PluginManifest;
 }
 
 /**
@@ -351,7 +496,7 @@ export function activeExports(): ActiveExport[] {
     if (!isPluginActive(p)) continue;
     for (const c of p.manifest.capabilities) {
       if (c.type === 'export') {
-        out.push({ pluginId: p.manifest.id, pluginName: p.manifest.name, capability: c });
+        out.push({ pluginId: p.manifest.id, pluginName: p.manifest.name, capability: c, manifest: p.manifest });
       }
     }
   }
@@ -384,7 +529,47 @@ export function activeCommands(): ActiveCommand[] {
   return out;
 }
 
-/** 清空全部插件状态（测试与"恢复出厂"用） */
+/* ------------------------------ 设置：解析成"这次到底怎么做" ------------------------------ */
+
+/** 这个插件声明的设置能力（没有就是 undefined） */
+export function settingsCapability(m: PluginManifest): SettingsCapability | undefined {
+  return m.capabilities.filter(function (c): c is SettingsCapability { return c.type === 'settings'; })[0];
+}
+
+/**
+ * 这次导出**实际用哪几列**。
+ *
+ * 用户勾了就用勾的（顺序也按选项顺序走，不受勾选先后影响 ——
+ * 同一份设置导出两次，"列的顺序每次都不一样"会让人以为出了问题）；
+ * 没勾、或插件压根没接设置，就用清单里声明的那组。
+ */
+export function resolveExportColumns(m: PluginManifest, cap: ExportCapability): ExportColumn[] {
+  if (!cap.columnsFrom) return cap.columns;
+  const s = settingsCapability(m);
+  if (!s) return cap.columns;
+  const field = s.fields.filter(function (f) { return f.key === cap.columnsFrom; })[0];
+  if (!field || field.type !== 'multi') return cap.columns;
+  const picked = readSettings(m.id, s)[field.key];
+  if (!Array.isArray(picked) || picked.length === 0) return cap.columns;
+  const ordered = field.options.filter(function (o) { return picked.indexOf(o) >= 0; }) as ExportColumn[];
+  return ordered.length > 0 ? ordered : cap.columns;
+}
+
+/** 这次导出**用什么文件名**（不含扩展名）；没有就返回 undefined（由调用方给默认名） */
+export function resolveExportFileName(m: PluginManifest, cap: ExportCapability): string | undefined {
+  if (!cap.fileNameFrom) return cap.fileName;
+  const s = settingsCapability(m);
+  if (!s) return cap.fileName;
+  const field = s.fields.filter(function (f) { return f.key === cap.fileNameFrom })[0];
+  if (!field || field.type !== 'text') return cap.fileName;
+  const v = readSettings(m.id, s)[field.key];
+  if (typeof v !== 'string') return cap.fileName;
+  const trimmed = v.trim();
+  return trimmed ? trimmed : cap.fileName;
+}
+
+/** 清空全部插件状态：安装记录 + 设置（测试与"清掉插件数据"用） */
 export function resetPlugins(): void {
   try { localStorage.removeItem(KEY); } catch (e) { /* 忽略 */ }
+  clearAllSettings();
 }

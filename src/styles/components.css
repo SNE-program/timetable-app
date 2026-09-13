@@ -547,6 +547,29 @@ input[type="range"].rng::-moz-range-thumb { width: 12px; height: 12px; border-ra
 .plugin-caps .chip { cursor: default; }
 .plugin-remove { margin-top: 10px; }
 
+/* ---------- 插件设置（v1.9.13：插件可以有自己的参数了） ----------
+   版式与上面的权限那一排刻意保持一致：同样的勾选框、同样的行距 ——
+   用户在这个面板里只需要认一种"可以勾的东西"。 */
+.plugin-settings {
+  margin-top: 10px; padding: 10px 12px;
+  border: 1px solid var(--c-border); border-radius: var(--r-panel);
+  background: var(--c-surface-2);
+}
+.plugin-settings-title { font-size: var(--fs-xs); font-weight: 600; color: var(--c-text-muted); letter-spacing: .3px; }
+.plugin-field { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.plugin-field.column { flex-direction: column; align-items: stretch; gap: 6px; }
+.plugin-field-text { flex: 1 1 auto; min-width: 0; }
+.plugin-field-label { font-size: var(--fs-sm); color: var(--c-text); }
+.plugin-field-hint { font-size: var(--fs-xs); color: var(--c-text-muted); line-height: 1.5; margin-top: 2px; }
+.plugin-field .switch { flex: 0 0 auto; }
+.plugin-field .input { width: 100%; }
+.plugin-field .plugin-perms { margin-top: 2px; }
+.plugin-field-actions { display: flex; justify-content: flex-end; margin-top: 10px; }
+.plugin-outcome {
+  margin-top: 8px; font-size: var(--fs-xs); color: var(--c-text-muted);
+  line-height: 1.6; word-break: break-word;
+}
+
 /* 导出菜单里名称下面的小字 */
 .export-opt { flex-direction: column; align-items: stretch; gap: 2px; }
 .export-opt .pk-label { display: flex; flex-direction: column; gap: 2px; }
