@@ -152,6 +152,39 @@ export function widgetBoundaryMs(p: WidgetPayload, now: number): number {
  * 数据永远推不过去，小组件就一直空着 —— 只有手动点「立即同步」才活过来。
  * 一次桥接调用的代价，远小于这种「加了没反应」的困惑。
  */
+/** 设备端的小组件状态（桌面实例数、最后推送时间、存了什么、下次自刷新时刻） */
+export interface WidgetDeviceState {
+  instancesNext: number;
+  instancesTimetable: number;
+  updatedAt: number;
+  scheduledAt: number;
+  payloadBytes: number;
+  term: string;
+  todayIso: string;
+  todayCount: number;
+  upcomingCount: number;
+  nextTitle: string;
+  nextStartMs: number;
+  sdk: number;
+  error?: string;
+}
+
+/**
+ * 问原生侧要一份"小组件现在到底怎么样了"。
+ *
+ * 存在的理由：小组件活在桌面进程里，"用不了"这件事在应用里看不出任何痕迹。
+ * 有了它，用户点一下就能看到：桌面上有几个实例、最后一次推送到什么时候、
+ * 数据里到底有几节课、下一次自己翻页是什么时候 —— 而这些正是排查要用的全部事实。
+ */
+export async function widgetDeviceState(): Promise<WidgetDeviceState | null> {
+  if (!isNativePlatform()) return null;
+  try {
+    return await nativeCall<WidgetDeviceState>('TimetableWidget', 'debugState', {});
+  } catch (e) {
+    return null;
+  }
+}
+
 export async function pushWidgetData(data: TimetableData): Promise<boolean> {
   try {
     const payload = buildWidgetPayload(data, new Date());

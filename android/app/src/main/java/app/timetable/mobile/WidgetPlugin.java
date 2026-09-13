@@ -3,6 +3,7 @@ package app.timetable.mobile;
 import android.appwidget.AppWidgetManager;
 import android.content.ComponentName;
 import android.content.Context;
+import android.os.Build;
 
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -10,6 +11,7 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
+import app.timetable.mobile.widget.WidgetData;
 import app.timetable.mobile.widget.NextClassWidgetProvider;
 import app.timetable.mobile.widget.TimetableWidgetProvider;
 import app.timetable.mobile.widget.WidgetRefresh;
@@ -24,6 +26,39 @@ import app.timetable.mobile.widget.WidgetStore;
  */
 @CapacitorPlugin(name = "TimetableWidget")
 public class WidgetPlugin extends Plugin {
+
+    /**
+     * 设备端体检：把"小组件到底有没有在用、数据推到了没"一次说清。
+     *
+     * 为什么要有它：小组件活在桌面进程里，出了问题在应用里看不出任何异常 ——
+     * 用户说"两个都用不了"，而我这边既看不到桌面上放了几个实例、
+     * 也看不到最后一次推送成功没有。这个接口把这些事实原样报给界面。
+     */
+    @PluginMethod
+    public void debugState(PluginCall call) {
+        Context ctx = getContext();
+        JSObject ret = new JSObject();
+        try {
+            String payload = WidgetStore.load(ctx);
+            WidgetData d = WidgetData.parse(payload);
+            ret.put("instancesNext", WidgetRefresh.idsOf(ctx, NextClassWidgetProvider.class).length);
+            ret.put("instancesTimetable", WidgetRefresh.idsOf(ctx, TimetableWidgetProvider.class).length);
+            ret.put("updatedAt", WidgetStore.updatedAt(ctx));
+            ret.put("scheduledAt", WidgetRefresh.scheduledAt(ctx));
+            ret.put("payloadBytes", payload == null ? 0 : payload.length());
+            ret.put("term", d.term);
+            ret.put("todayIso", d.todayIso);
+            ret.put("todayCount", d.today.size());
+            ret.put("upcomingCount", d.upcoming.size());
+            WidgetData.Item nx = d.pickNext(System.currentTimeMillis());
+            ret.put("nextTitle", nx == null ? "" : nx.title);
+            ret.put("nextStartMs", nx == null ? 0L : nx.startMs);
+            ret.put("sdk", Build.VERSION.SDK_INT);
+        } catch (Exception e) {
+            ret.put("error", String.valueOf(e.getMessage()));
+        }
+        call.resolve(ret);
+    }
 
     /** 写入小组件数据并刷新 */
     @PluginMethod

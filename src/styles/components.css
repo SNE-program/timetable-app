@@ -1468,12 +1468,19 @@ input[type="range"].rng::-moz-range-thumb { width: 12px; height: 12px; border-ra
  * 与桌面上系统给的那块地方同一个数。配色也照抄原生布局里的固定色
  * （小组件本身不跟随深浅色主题，用纯色是为了在任何壁纸上都看得清）。
  */
-.wgt-grid { display: flex; flex-wrap: wrap; gap: 14px; padding: 2px 0 10px; }
-.wgt-item { display: flex; flex-direction: column; gap: 6px; }
-.wgt-frame { width: 110px; height: 110px; flex: 0 0 auto; }
+/*
+ * 每一项的**宽度跟着卡片走**（110 或 250），说明文字在项内换行。
+ *
+ * 原来说明块写的是 max-width:250px，于是 110px 宽的项被文字撑成 250px ——
+ * 一排里小卡片缩在左边、说明横跨到隔壁，看上去"边缘都重合在一起"（用户反馈）。
+ * 现在宽度由 data-size 决定，卡片铺满整项、说明在项内折行，项与项之间的 14px 才是真间距。
+ */
+.wgt-grid { display: flex; flex-wrap: wrap; gap: 16px 14px; padding: 2px 0 10px; }
+.wgt-item { display: flex; flex-direction: column; gap: 6px; width: 110px; flex: 0 0 auto; }
+.wgt-item[data-size="4×2"], .wgt-item[data-size="4×3"] { width: 250px; }
+.wgt-frame { width: 100%; height: 110px; }
 .wgt-frame[data-size="2×3"] { height: 180px; }
-.wgt-frame[data-size="4×2"] { width: 250px; }
-.wgt-frame[data-size="4×3"] { width: 250px; height: 180px; }
+.wgt-frame[data-size="4×3"] { height: 180px; }
 .wgt-card {
   width: 100%; height: 100%; box-sizing: border-box; overflow: hidden;
   display: flex; flex-direction: column;
@@ -1500,7 +1507,7 @@ input[type="range"].rng::-moz-range-thumb { width: 12px; height: 12px; border-ra
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .wgt-empty { margin: auto 0; text-align: center; font-size: 12px; color: #8A8F98; }
-.wgt-cap { max-width: 250px; font-size: var(--fs-xs); color: var(--c-text-2); line-height: 1.5; }
+.wgt-cap { max-width: 100%; font-size: var(--fs-xs); color: var(--c-text-2); line-height: 1.5; }
 .wgt-note { color: var(--c-text-3); }
 
 /* 快捷键的键位样式：像键帽，一眼能和正文区分开 */

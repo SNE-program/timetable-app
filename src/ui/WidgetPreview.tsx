@@ -28,7 +28,7 @@ export default function WidgetPreview(props: { payload: WidgetPayload }) {
         const rows = view.rows;
         const empty = !view.next && rows.length === 0;
         return (
-          <div className="wgt-item" key={preset.label + preset.kind}>
+          <div className="wgt-item" data-size={preset.label} key={preset.label + preset.kind}>
             <div className="wgt-frame" data-size={preset.label}>
               <div className="wgt-card">
                 <div className="wgt-term">{props.payload.term || '课表助手'}</div>
