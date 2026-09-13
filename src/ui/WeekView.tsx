@@ -1,6 +1,7 @@
 import React from 'react';
 import {
-  jumpToDate, openAdd, openCourse, openOverride, openScheme, setTab, setWeek, shareWeekImage, useApp,
+  jumpToDate, openAdd, openCourse, openOverride, openScheme, setTab, setWeek, shareWeekImage, showToast,
+  upsertOverride, useApp,
 } from '../app/store';
 import {
   dateOf, dayOfWeekOf, expandWeek, parseISODate, shortDateLabel, toISODate, toMinutes, todayISO,
@@ -17,6 +18,42 @@ import { Icon } from './icons';
 import { countRender } from '../app/renderCount';
 
 const WEEKDAY_CN = ['一', '二', '三', '四', '五', '六', '日'];
+
+/** 一次拖动的进行态。只服务于「改天 / 改节次」这件事，别的一概不做 */
+interface DragState {
+  sessionId: string;
+  /** 这一次课原本的日期（ISO） */
+  date: string;
+  title: string;
+  /** 拖动前的节次，用于算"有没有真的变" */
+  fromStart: number;
+  fromEnd: number;
+  fromDay: number;
+  /** 拖动模式：整块移动 / 拖上边缘改开始 / 拖下边缘改结束 */
+  mode: 'move' | 'resize-top' | 'resize-bottom';
+  /** 抓住的位置在卡片内占了几行（移动时保持手感：抓哪就跟着哪） */
+  grabRowOffset: number;
+  /** 当前预览到的目标 */
+  toDay: number;
+  toStart: number;
+  toEnd: number;
+  /** 这张卡上已有的调整（合并时要保留，别把用户之前改的抹掉） */
+  existingPatch: Record<string, unknown>;
+  existingReason?: string;
+}
+
+/** 卡片上、下边缘这么多像素之内算"拉伸"，其余算"整块移动" */
+const EDGE_PX = 18;
+/** 长按多久进入"准备拖动"（松手不改动就是原来的调课面板） */
+const HOLD_MS = 420;
+/** 触屏上挪动超过这么多像素就认为是在滚动，不再算拖动 */
+const SCROLL_SLOP = 10;
+/** 鼠标不需要长按：按下后移动超过这么多像素就开始拖 */
+const MOUSE_SLOP = 6;
+
+function clampInt(v: number, lo: number, hi: number): number {
+  return v < lo ? lo : (v > hi ? hi : v);
+}
 
 function eventStyle(e: ConcreteEvent, course: Course | undefined, theme: Theme, palette: string[], dark: boolean, days: number): React.CSSProperties {
   const cc = courseColor(palette, e.colorIndex);
@@ -36,7 +73,16 @@ function eventStyle(e: ConcreteEvent, course: Course | undefined, theme: Theme, 
   return style as React.CSSProperties;
 }
 
-function EventCard(props: { e: ConcreteEvent; course: Course | undefined; theme: Theme; palette: string[]; dark: boolean; days: number }) {
+function EventCard(props: {
+  e: ConcreteEvent; course: Course | undefined; theme: Theme; palette: string[]; dark: boolean; days: number;
+  /**
+   * 手势交给外面：周视图那边才知道网格几何（一天多宽、一节多高），
+   * 卡片只报告"按下 / 移动 / 松手"三件事，不自己算坐标。
+   */
+  onGrabStart: (e: ConcreteEvent, mode: DragState['mode'], ev: React.PointerEvent, card: DOMRect) => void;
+  onGrabMove: (ev: React.PointerEvent) => boolean;
+  onGrabEnd: (moved: boolean) => boolean;
+}) {
   const e = props.e;
   const course = props.course;
   const hasImage = !!(course && course.image && props.theme.cardStyle !== 'outline');
@@ -49,34 +95,90 @@ function EventCard(props: { e: ConcreteEvent; course: Course | undefined; theme:
     + (e.location ? '，' + e.location : '')
     + (props.theme.showTeacher && e.teacher ? '，' + e.teacher : '')
     + (e.modifiedBy ? '，已调整' : '');
-  /* 长按 500ms 直接进调课面板；长按触发后抑制随后的 click */
+  /*
+   * 三种手势共用一次按下：
+   *
+   *   长按（420ms）→ 卡片"拿起来"（略微抬起）：此时**松手 = 打开调课面板**（老行为不变），
+   *                    **移动 = 拖动**（改天 / 改节次）；
+   *   鼠标：不用长按，按下后移动 6px 就开始拖 —— 桌面上拖东西本来就该是直接的；
+   *   轻点：什么都没发生，交给 click（打开课程详情）。
+   *
+   * 手指在长按期间挪动超过 10px 就当作在滚动（横滑翻周是周视图自己的手势），
+   * 直接放弃这次拖动 —— 否则"想翻周却把课拖走了"。
+   */
   const timer = React.useRef<number | null>(null);
   const longPressed = React.useRef(false);
+  const held = React.useRef(false);
+  /** 已经真的拖动过（决定松手后要不要抑制 click） */
+  const dragged = React.useRef(false);
   const startAt = React.useRef({ x: 0, y: 0 });
+
+  /**
+   * 落在卡片上/下边缘算"拉伸"，中间算"整块移动"。
+   *
+   * 边缘宽度要**按卡高收一收**：一节的小卡只有 50 多像素高，固定 18px 会让
+   * 上下两条边缘吃掉整张卡 —— 那种情况下永远拖不动整块，只能改节数。
+   */
+  function modeAt(ev: React.PointerEvent): DragState['mode'] {
+    const r = (ev.currentTarget as HTMLElement).getBoundingClientRect();
+    const edge = Math.min(EDGE_PX, Math.max(8, r.height / 3));
+    if (ev.clientY - r.top <= edge) return 'resize-top';
+    if (r.bottom - ev.clientY <= edge) return 'resize-bottom';
+    return 'move';
+  }
 
   function pressStart(ev: React.PointerEvent) {
     longPressed.current = false;
+    held.current = false;
+    dragged.current = false;
     startAt.current = { x: ev.clientX, y: ev.clientY };
+    const card = (ev.currentTarget as HTMLElement).getBoundingClientRect();
+    const mode = modeAt(ev);
+    if (ev.pointerType === 'mouse') {
+      /* 鼠标：按下就先记一笔，等移动够远再真正开始拖 */
+      props.onGrabStart(e, mode, ev, card);
+      return;
+    }
     if (timer.current !== null) window.clearTimeout(timer.current);
     timer.current = window.setTimeout(function () {
       timer.current = null;
-      longPressed.current = true;
-      openOverride(e.sessionId);
-    }, 600);
+      held.current = true;
+      props.onGrabStart(e, mode, ev, card);
+    }, HOLD_MS);
   }
-  /* 手指挪动超过 10px 说明是在滚动 / 拖拽，不算长按 */
+
   function pressMove(ev: React.PointerEvent) {
-    if (timer.current === null) return;
     const dx = ev.clientX - startAt.current.x;
     const dy = ev.clientY - startAt.current.y;
-    if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
+    if (held.current || ev.pointerType === 'mouse') {
+      /* 父组件说"够远了、开始拖"，之后这次手势就不再是点击 */
+      if (props.onGrabMove(ev)) dragged.current = true;
+      return;
+    }
+    if (timer.current === null) return;
+    if (Math.abs(dx) > SCROLL_SLOP || Math.abs(dy) > SCROLL_SLOP) {
       window.clearTimeout(timer.current);
       timer.current = null;
+      props.onGrabEnd(false);
     }
   }
-  function pressEnd() {
+
+  function pressEnd(): void {
     if (timer.current !== null) { window.clearTimeout(timer.current); timer.current = null; }
+    /* 真的拖动过：结束这次拖动，并抑制后面那一下 click（否则松手会顺手打开课程详情） */
+    if (dragged.current) {
+      dragged.current = false;
+      longPressed.current = true;
+      props.onGrabEnd(true);
+      return;
+    }
+    /* 长按过但没移动：老行为 —— 打开「调整某一次课」 */
+    const wasHeld = held.current;
+    held.current = false;
+    props.onGrabEnd(false);
+    if (wasHeld) openOverride(e.sessionId);
   }
+
   return (
     /*
      * 课程卡是 div 而不是 button（里面还有长按手势、图层、绝对定位），
@@ -86,6 +188,10 @@ function EventCard(props: { e: ConcreteEvent; course: Course | undefined; theme:
      */
     <div
       className={cls}
+      /* 位置信息落在 DOM 上：拖动自检（?dragcheck=1）要靠它挑样本、核对结果 */
+      data-day={e.dayOfWeek}
+      data-start={e.periodStart}
+      data-end={e.periodEnd}
       data-style={hasImage ? 'image' : props.theme.cardStyle}
       style={style}
       role="button"
@@ -144,6 +250,153 @@ export default function WeekView() {
   }, [data, s.week, days]);
   const conflicts = React.useMemo(function () { return weekConflicts(data, s.week); }, [data, s.week]);
 
+  /*
+   * 拖动改课（v1.9.6）。
+   *
+   * 网格是百分比定位的（列 = 100%/天数，行 = --row-h），所以"指针落在哪个格子"
+   * 完全由 .days 的矩形反算出来 —— 不去读每张卡的坐标，也就不会有"卡片错位导致算错"。
+   *
+   * 改动最终落在**一次调课（Override）**上，走的是和「调整某一次课」面板同一个入口：
+   * 于是它自动进撤销栈、自动重排提醒，而且事后能一键恢复。
+   */
+  const daysRef = React.useRef<HTMLDivElement>(null);
+  const dragRef = React.useRef<DragState | null>(null);
+  const [drag, setDrag] = React.useState<DragState | null>(null);
+  /** 指针按下时记下的几何信息（还没开始拖之前也要留着） */
+  const pending = React.useRef<{ mode: DragState['mode']; x: number; y: number; grabRow: number } | null>(null);
+
+  /** 指针 → 目标格子。取不到容器时返回 null（缩放/旋转的瞬间可能发生） */
+  function cellAt(clientX: number, clientY: number): { day: number; row: number } | null {
+    const el = daysRef.current;
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return null;
+    const day = clampInt(Math.floor((clientX - r.left) / (r.width / days)) + 1, 1, days);
+    const row = clampInt(Math.floor((clientY - r.top) / (r.height / periods.length)) + 1, 1, periods.length);
+    return { day: day, row: row };
+  }
+
+  function grabStart(e: ConcreteEvent, mode: DragState['mode'], ev: React.PointerEvent, card: DOMRect): void {
+    const rowH = card.height / Math.max(1, e.periodEnd - e.periodStart + 1);
+    const grabRow = clampInt(Math.floor((ev.clientY - card.top) / Math.max(1, rowH)), 0, e.periodEnd - e.periodStart);
+    const ov = (data.overrides || []).filter(function (o) { return o.id === e.modifiedBy; })[0];
+    pending.current = { mode: mode, x: ev.clientX, y: ev.clientY, grabRow: grabRow };
+    dragRef.current = {
+      sessionId: e.sessionId,
+      date: e.date,
+      title: e.title,
+      fromStart: e.periodStart,
+      fromEnd: e.periodEnd,
+      fromDay: e.dayOfWeek,
+      mode: mode,
+      grabRowOffset: grabRow,
+      toDay: e.dayOfWeek,
+      toStart: e.periodStart,
+      toEnd: e.periodEnd,
+      existingPatch: (ov && ov.patch ? ov.patch : {}) as Record<string, unknown>,
+      existingReason: ov ? ov.reason : undefined,
+    };
+  }
+
+  /** 返回 true 表示"够远了，这次手势算拖动"；父组件据此让卡片抑制 click */
+  function grabMove(ev: React.PointerEvent): boolean {
+    const p = pending.current;
+    const d = dragRef.current;
+    if (!p || !d) return false;
+    const far = Math.abs(ev.clientX - p.x) + Math.abs(ev.clientY - p.y) >= MOUSE_SLOP;
+    const cell = cellAt(ev.clientX, ev.clientY);
+    if (!cell) return false;
+    /* 触屏上是长按之后才开始拖（卡片那边已经把长按这一关过了），鼠标则看移动距离 */
+    const active = ev.pointerType === 'mouse' ? far : true;
+    if (!active) return false;
+
+    const len = d.fromEnd - d.fromStart + 1;
+    let toDay = d.fromDay;
+    let toStart = d.fromStart;
+    let toEnd = d.fromEnd;
+    if (d.mode === 'move') {
+      toDay = cell.day;
+      toStart = clampInt(cell.row - d.grabRowOffset, 1, periods.length - len + 1);
+      toEnd = toStart + len - 1;
+    } else if (d.mode === 'resize-top') {
+      toStart = clampInt(cell.row, 1, d.fromEnd);
+      toEnd = d.fromEnd;
+    } else {
+      toStart = d.fromStart;
+      toEnd = clampInt(cell.row, d.fromStart, periods.length);
+    }
+    if (toDay === d.toDay && toStart === d.toStart && toEnd === d.toEnd) return true;
+    const next = Object.assign({}, d, { toDay: toDay, toStart: toStart, toEnd: toEnd });
+    dragRef.current = next;
+    setDrag(next);
+    return true;
+  }
+
+  /**
+   * 结束手势。
+   *
+   * 只有"目标真的和原来不一样"才写数据：鼠标点一下卡片、轻微抖两像素，
+   * 不该产生一条调整记录（那会让撤销栈里全是垃圾）。
+   */
+  function grabEnd(commit: boolean): boolean {
+    const d = dragRef.current;
+    const p = pending.current;
+    dragRef.current = null;
+    pending.current = null;
+    setDrag(null);
+    if (!d || !p) return false;
+    const moved = d.toDay !== d.fromDay || d.toStart !== d.fromStart || d.toEnd !== d.fromEnd;
+    /* 自检（?dragcheck=1）要能看到这次拖动到底算出了什么 —— 拖动的失败方式大多是"数值没算对" */
+    try {
+      (window as unknown as { __lastDrag?: unknown }).__lastDrag = {
+        title: d.title, sessionId: d.sessionId, date: d.date,
+        mode: d.mode, fromDay: d.fromDay, fromStart: d.fromStart, fromEnd: d.fromEnd,
+        toDay: d.toDay, toStart: d.toStart, toEnd: d.toEnd, moved: moved, commit: commit,
+      };
+    } catch (e) { /* 忽略 */ }
+    if (!commit || !moved) return false;
+
+    const patch: Record<string, unknown> = Object.assign({}, d.existingPatch, {
+      periodStart: d.toStart,
+      periodEnd: d.toEnd,
+    });
+    /* 换了天：写 dayOfWeek（同一教学周内换天），并把可能残留的 newDate 去掉 */
+    if (d.toDay !== d.fromDay) {
+      patch.dayOfWeek = d.toDay;
+      delete patch.newDate;
+    }
+    upsertOverride({
+      sessionId: d.sessionId,
+      date: d.date,
+      action: 'reschedule',
+      patch: patch,
+      reason: d.existingReason || '在课表上拖动调整',
+    });
+    return true;
+  }
+
+  /* Esc 取消拖动：拖到一半发现拖错了，不该被迫松手落下去 */
+  React.useEffect(function () {
+    if (!drag) return;
+    function onKey(ev: KeyboardEvent): void {
+      if (ev.key !== 'Escape') return;
+      ev.preventDefault();
+      grabEnd(false);
+      showToast('已取消这次拖动', 'info');
+    }
+    window.addEventListener('keydown', onKey);
+    return function () { window.removeEventListener('keydown', onKey); };
+  }, [drag]);
+
+  /** 拖动中的提示："→ 周三 第 3-4 节"，落在卡片上方的浮标里 */
+  function dragHint(d: DragState): string {
+    const bits: string[] = [];
+    if (d.toDay !== d.fromDay) bits.push('周' + WEEKDAY_CN[d.toDay - 1]);
+    if (d.toStart !== d.fromStart || d.toEnd !== d.fromEnd) {
+      bits.push('第 ' + d.toStart + (d.toEnd !== d.toStart ? '-' + d.toEnd : '') + ' 节');
+    }
+    return bits.length > 0 ? bits.join(' · ') : '没有变化';
+  }
   const stats = React.useMemo(function () {
     const totalMin = events.reduce(function (sum, e) { return sum + (e.endMinutes - e.startMinutes); }, 0);
     const perDay = [1, 2, 3, 4, 5, 6, 7].map(function (d) {
@@ -282,6 +535,7 @@ export default function WeekView() {
         </div>
         <div
           className="days"
+          ref={daysRef}
           style={{
             ['--cols']: String(days),
             ['--colw']: (100 / days) + '%',
@@ -298,8 +552,29 @@ export default function WeekView() {
             />
           ) : null}
           {events.map(function (e) {
-            return <EventCard key={e.key} e={e} course={courseById.get(e.courseId)} theme={theme} palette={palette} dark={dark} days={days} />;
+            return (
+              <EventCard
+                key={e.key} e={e} course={courseById.get(e.courseId)} theme={theme} palette={palette}
+                dark={dark} days={days}
+                onGrabStart={grabStart} onGrabMove={grabMove} onGrabEnd={grabEnd}
+              />
+            );
           })}
+          {/* 拖动预览：虚线框 + 一句"会变成什么"。位置用的是同一套百分比公式，所见即所得 */}
+          {drag ? (
+            <div
+              className="ev-drag-ghost"
+              style={{
+                left: 'calc((100% / ' + days + ') * ' + (drag.toDay - 1) + ' + var(--gap) / 2)',
+                width: 'calc(100% / ' + days + ' - var(--gap))',
+                top: 'calc(var(--row-h) * ' + (drag.toStart - 1) + ' + 2px)',
+                height: 'calc(var(--row-h) * ' + (drag.toEnd - drag.toStart + 1) + ' - var(--gap))',
+              }}
+            >
+              <div className="ev-drag-label">{dragHint(drag)}</div>
+            </div>
+          ) : null}
+
           {nowTop !== null ? (
             <div
               className="now-line"

@@ -214,3 +214,22 @@
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* ------------------------------ 拖动改课（v1.9.6） ------------------------------ */
+/*
+ * 拖动预览：位置与尺寸用的是和课程卡完全相同的百分比公式（见 WeekView 的 eventStyle），
+ * 所以框到哪里就真的会落到哪里 —— 预览和结果不一致的拖动比没有拖动更让人不敢用。
+ */
+.ev-drag-ghost {
+  position: absolute; z-index: 6; pointer-events: none;
+  border: 2px dashed var(--c-accent); border-radius: var(--r-card);
+  background: color-mix(in srgb, var(--c-accent) 12%, transparent);
+  display: flex; align-items: flex-start; justify-content: center;
+}
+.ev-drag-label {
+  margin-top: 4px; padding: 2px 8px; border-radius: 999px;
+  background: var(--c-accent); color: #fff; font-size: var(--fs-xs); font-weight: 700;
+  white-space: nowrap;
+}
+/* 捏起来的那张卡：稍微抬起一点，给出"正在拖动"的手感 */
+.ev.is-dragging { opacity: .55; }

@@ -12,8 +12,8 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import WidgetPreview from '../ui/WidgetPreview';
 import {
-  getState, historyEntries, openHistory, openOverride, patchTheme, setData, setTab, storeEmitCount, toggleTask, undoTo,
-  upsertOverride,
+  getState, historyEntries, openHistory, openOverride, patchTheme, setData, setTab, storeEmitCount, toggleTask, undo,
+  undoTo, upsertOverride,
 } from './store';
 import { dayOfWeekOf, parseISODate, todayISO, weekLimitOf, weekMatches, weekOfDate } from '../core/engine';
 import { renderCounts } from './renderCount';
@@ -776,6 +776,97 @@ function runWidgetPreviewCheck(): void {
   }, 1200);
 }
 
+/**
+ * 拖动改课的自检（?dragcheck=1）。
+ *
+ * 拖动是"手指/鼠标动作"，无头浏览器里没人能替它拖 —— 所以这里**合成指针事件**：
+ * 在一张课程卡上按下、移动两格、松手，然后看数据里有没有真的多出一条调整记录，
+ * 以及那条记录的目标（换到哪天、第几节）是不是我们预期的。
+ *
+ * 为什么值得写：拖动的接线特别容易"看起来做了但其实没生效"
+ * （事件挂在卡片上、坐标算成 0、松手时目标没变所以不写库……），
+ * 光靠代码审查看不出来，而用户在桌面上拖一下就会发现"拖了没反应"。
+ */
+function runDragCheck(): void {
+  let send = function (_text: string): void { /* 默认不回传 */ };
+  try { send = makeReporter(new URLSearchParams(window.location.search).get('report') || ''); } catch (e) { /* 忽略 */ }
+
+  /** 合成一次指针事件（React 的合成事件同样吃 pointerdown/move/up） */
+  function fire(el: Element, type: string, x: number, y: number): void {
+    const ev = new PointerEvent(type, {
+      bubbles: true, cancelable: true, composed: true,
+      clientX: x, clientY: y, pointerId: 1, pointerType: 'mouse', isPrimary: true, buttons: 1,
+    });
+    el.dispatchEvent(ev);
+  }
+
+  setTimeout(function () {
+    void (async function () {
+      const grid = (document.querySelector('.days') as HTMLElement).getBoundingClientRect();
+      const days = Number(getComputedStyle(document.querySelector('.days') as HTMLElement).getPropertyValue('--cols')) || 5;
+      const colW = grid.width / days;
+      const rowH = grid.height / 12;
+      const cards = Array.prototype.slice.call(document.querySelectorAll('.days .ev')) as HTMLElement[];
+      if (cards.length === 0) { send('DRAGCHECK 课表里没有课，跳过'); return; }
+
+      /** 挑一张右边还有列、上下都留了空位的卡（否则目标会被夹住，看起来像"没生效"） */
+      function pickCard(): HTMLElement | null {
+        const ok = cards.filter(function (c) {
+          const r = c.getBoundingClientRect();
+          return Number(c.getAttribute('data-day')) < days
+            && r.top - grid.top > grid.height * 0.12 && grid.bottom - r.bottom > grid.height * 0.12;
+        });
+        return ok[0] || cards[0] || null;
+      }
+
+      /**
+       * 跑一次拖动。centerY 决定抓哪儿：
+       *   卡片垂直中点 → 整块移动（期望：换了天 / 换了节次）
+       *   卡片上边缘   → 拉伸（期望：只改开始节次，天不变）
+       */
+      async function dragOnce(label: string, grab: 'middle' | 'top-edge'): Promise<void> {
+        const card = pickCard();
+        if (!card) { send('DRAGCHECK ' + label + '：没有可用的样本'); return; }
+        const before = getState().data.overrides.length;
+        const beforeAttrs = '周' + card.getAttribute('data-day') + ' 第' + card.getAttribute('data-start')
+          + '-' + card.getAttribute('data-end') + ' 节';
+        const r = card.getBoundingClientRect();
+        const sx = r.left + r.width / 2;
+        const sy = grab === 'middle' ? r.top + r.height / 2 : r.top + 4;
+        fire(card, 'pointerdown', sx, sy);
+        fire(card, 'pointermove', sx + 8, sy + 6);
+        fire(card, 'pointermove', sx + colW * 1.5, sy + 6);
+        const tx = sx + colW * 2;
+        const ty = sy + rowH;
+        fire(card, 'pointermove', tx, ty);
+        /* 让 React 把预览画出来再读（状态更新是异步的，立刻读只会读到上一帧） */
+        await new Promise(function (res) { requestAnimationFrame(function () { res(null); }); });
+        const ghost = document.querySelector('.ev-drag-ghost');
+        const ghostText = ghost ? (ghost.textContent || '') : '';
+        fire(card, 'pointerup', tx, ty);
+        await new Promise(function (res) { setTimeout(res, 350); });
+
+        const st = getState();
+        const added = st.data.overrides.length - before;
+        const last = st.data.overrides[st.data.overrides.length - 1];
+        send('DRAGCHECK【' + label + '】样本 ' + beforeAttrs + '，抓' + (grab === 'middle' ? '中间' : '上边缘')
+          + ' → 预览=' + (ghostText ? '"' + ghostText + '"' : '（没出现）')
+          + '，新增调整=' + added
+          + (added > 0 && last ? ' patch=' + JSON.stringify(last.patch) : '')
+          + '，计算=' + JSON.stringify((window as unknown as { __lastDrag?: unknown }).__lastDrag || null));
+        /* 撤销回去：自检不该把用户的课表改了还留着 */
+        if (added > 0) {
+          undo();
+          send('DRAGCHECK【' + label + '】撤销后 overrides=' + getState().data.overrides.length + '（应与拖动前一致）');
+        }
+      }
+
+      await dragOnce('整块移动', 'middle');
+      await dragOnce('拖上边缘改节数', 'top-edge');
+    })();
+  }, 1600);
+}
+
 export function runDiagnostics(): void {
   const params = new URLSearchParams(window.location.search);
 
@@ -788,6 +879,7 @@ export function runDiagnostics(): void {
   if (params.get('histcheck')) runHistoryCheck(Number(params.get('histcheck')));
   if (params.get('ovcheck') === '1') runOverrideCheck();
   if (params.get('wp') === '1') runWidgetPreviewCheck();
+  if (params.get('dragcheck') === '1') runDragCheck();
   if (params.get('behavecheck')) {
     const sec = Number(params.get('behavecheck'));
     runBehaviorCheck(isFinite(sec) && sec >= 5 ? Math.min(180, sec) : 30);
