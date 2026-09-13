@@ -1,5 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 2×2：下一节课 + 倒计时。配色刻意用中性色，深浅色主题下都能看 -->
+<!--
+  小的那个小组件（2×2）：下一节课 + 倒计时；拉高之后多列两节。
+
+  两处刻意的写法：
+
+    1. widget_empty **默认可见**并带一句占位文字。小组件刚放上桌面时，
+       系统会先用 initialLayout 画一次；如果占位文字是 gone，用户看到的就是
+       一块空白 —— "加了没用"。现在至少写着「打开应用同步一次」。
+    2. widget_extras（拉高才出现的那两行）默认 gone，由代码按桌面给的高度
+       决定显示几行（见 NextClassWidgetProvider 与 WidgetSize.extraRows）。
+
+  配色刻意用中性色，深浅色主题下都能看。
+-->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
@@ -26,8 +38,7 @@
         android:gravity="center"
         android:textSize="12sp"
         android:textColor="#8A8F98"
-        android:visibility="gone"
-        android:text="接下来没有课" />
+        android:text="打开应用同步一次" />
 
     <LinearLayout
         android:id="@+id/widget_body"
@@ -35,7 +46,8 @@
         android:layout_height="0dp"
         android:layout_weight="1"
         android:orientation="vertical"
-        android:gravity="center_vertical">
+        android:gravity="center_vertical"
+        android:visibility="gone">
 
         <Chronometer
             android:id="@+id/widget_count"
@@ -45,14 +57,6 @@
             android:textStyle="bold"
             android:textColor="#1677FF"
             android:format="%s" />
-
-        <TextView
-            android:id="@+id/widget_when"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textSize="11sp"
-            android:textColor="#8A8F98"
-            android:visibility="gone" />
 
         <TextView
             android:id="@+id/widget_course"
@@ -73,5 +77,78 @@
             android:ellipsize="end"
             android:textSize="11sp"
             android:textColor="#8A8F98" />
+    </LinearLayout>
+
+    <!-- 拉高之后才出现的两行（2×2 时整块是隐藏的） -->
+    <LinearLayout
+        android:id="@+id/widget_extras"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingTop="4dp"
+        android:visibility="gone">
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#1A000000" />
+
+        <LinearLayout
+            android:id="@+id/widget_x1_box"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingTop="3dp"
+            android:paddingBottom="3dp">
+
+            <TextView
+                android:id="@+id/widget_x1_time"
+                android:layout_width="42dp"
+                android:layout_height="wrap_content"
+                android:singleLine="true"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:textColor="#1677FF" />
+
+            <TextView
+                android:id="@+id/widget_x1_title"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:textSize="12sp"
+                android:textColor="#1D2129" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/widget_x2_box"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingTop="3dp"
+            android:paddingBottom="3dp">
+
+            <TextView
+                android:id="@+id/widget_x2_time"
+                android:layout_width="42dp"
+                android:layout_height="wrap_content"
+                android:singleLine="true"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:textColor="#1677FF" />
+
+            <TextView
+                android:id="@+id/widget_x2_title"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:textSize="12sp"
+                android:textColor="#1D2129" />
+        </LinearLayout>
     </LinearLayout>
 </LinearLayout>

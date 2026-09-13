@@ -2,7 +2,7 @@ import React from 'react';
 import {
   clearAllCourses, confirmDanger, exportIcsNow, exportThemeNow, importIcsFromFile, importTimetableFromFile,
   openChangelog, openCloudSheet, openExport, openHistory, openImportSheet, openManual, openScheme,
-  openShare, patchPrefs,
+  openShare, openShortcutSheet, patchPrefs,
   setNotifyStatus, shareWeekImage, toastSave, setReminderRule, setTerm, showToast, updateLine, useApp,
   checkUpdateNow,
 } from '../app/store';
@@ -605,6 +605,17 @@ export default function SettingsView() {
           on={s.prefs.confirmDestructive !== false}
           onChange={function (v) { patchPrefs({ confirmDestructive: v }); }}
         />
+        {/*
+          快捷键说明。放在这一块而不是单开一个面板：它和"防误触"是同一件事的两面 ——
+          快捷操作既要好用，也不能因为记错键而误触。
+        */}
+        <div className="list-row tap" style={{ cursor: 'pointer' }} onClick={openShortcutSheet}>
+          <div>
+            <div className="lr-label">键盘与快捷操作</div>
+            <div className="lr-sub">电脑上的快捷键一览，以及手机上的长按 / 拖动说明</div>
+          </div>
+          <div className="lr-right">›</div>
+        </div>
       </Panel>
 
       {/* ------------------------------ 云（可选） ------------------------------ */}

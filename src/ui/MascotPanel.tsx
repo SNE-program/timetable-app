@@ -1,11 +1,9 @@
 import React from 'react';
 import {
-  closeSheets, confirmDanger, importMascotImage, importMascotPack, importMascotSheet, mascotExportText,
-  openCloudSheet, openManual, openMascotEditor, patchMascotPrefs, patchPrefs, removeMascot, repairMascotFrames,
-  resetMascotPosition, showToast, useApp,
+  confirmDanger, importMascotPack, openMascotCenter, patchMascotPrefs, patchPrefs, removeMascot,
+  repairMascotFrames, resetMascotPosition, showToast, useApp,
 } from '../app/store';
-import { prepareMascotImage } from '../theme/image';
-import { describeVideoSheet, isVideoFile, videoToSpriteSheet } from '../theme/videoSheet';
+import { exportMascotPackFile, importMascotMedia, importMascotPackFile, pickFile } from './mascotImport';
 import { inspectMascot, needsFix, type MascotFinding } from '../mascot/inspect';
 import { describeAsset, providedStates } from '../mascot/pack';
 import { HEIGHT_MAX, HEIGHT_MIN, MASCOT_STATES, STATE_LABEL } from '../mascot/types';
@@ -33,8 +31,6 @@ export default function MascotPanel() {
   const [busy, setBusy] = React.useState(false);
   /** 粘贴角色包：相册里没有 .json，这是没有文件管理器时唯一的路 */
   const [paste, setPaste] = React.useState(false);
-  /** 「更多功能」展开状态：默认收起，面板上只留一个主入口 */
-  const [more, setMore] = React.useState(false);
   const [pasted, setPasted] = React.useState('');
   /** 滑杆的临时值：拖动时只更新它，停手后才写盘 */
   const [sizeDraft, setSizeDraft] = React.useState(mp.size);
@@ -43,8 +39,6 @@ export default function MascotPanel() {
   /** 检查结果 */
   const [findings, setFindings] = React.useState<MascotFinding[] | null>(null);
   const [checking, setChecking] = React.useState(false);
-  const packRef = React.useRef<HTMLInputElement>(null);
-  const imgRef = React.useRef<HTMLInputElement>(null);
 
   /* 外部（换个角色、恢复默认）改了尺寸要同步回来 */
   React.useEffect(function () { setSizeDraft(mp.size); }, [mp.size]);
@@ -55,64 +49,32 @@ export default function MascotPanel() {
     return function () { window.clearTimeout(id); };
   }, [sizeDraft, mp.size]);
 
-  async function onPackFile(file: File): Promise<void> {
+  /**
+   * 导入的两条路（角色包 / 图或视频）都走 ui/mascotImport.ts 里那份共用实现 ——
+   * 角色中心用的是同一份，所以"从面板导入"和"从角色中心导入"不会有行为差别。
+   */
+  /** 这个角色提供了哪几种状态（面板头像下面那一行） */
+  const states = pack ? providedStates(pack) : [];
+
+  async function pickAndImportPack(): Promise<void> {
+    const f = await pickFile('.json,application/json');
+    if (!f) return;
     setBusy(true);
     try {
-      const text = await file.text();
-      const r = importMascotPack(text, file.name);
-      if (!r.ok) {
-        showToast('角色包导入失败：' + r.error, 'error');
-        return;
-      }
-      showToast('角色已就位' + (r.warnings.length ? '（' + r.warnings.length + ' 条提示）' : '') + '，按住它可以拖到别的位置', 'ok');
-      if (r.warnings.length) console.warn('角色包提示：', r.warnings);
+      await importMascotPackFile(f);
     } finally {
       setBusy(false);
     }
   }
 
-  async function onImageFile(file: File): Promise<void> {
+  async function pickAndImportMedia(): Promise<void> {
+    const f = await pickFile('image/*,video/*');
+    if (!f) return;
     setBusy(true);
     setReport(null);
-    const base = file.name.replace(/\.[^.]+$/, '');
-    const dpr = window.devicePixelRatio || 1;
     try {
-      /*
-       * 视频（webm / mp4 …）走另一条管线：抽帧拼成逐帧雪碧图。
-       * 二游的动图素材大量是 webm，而 webm 是视频不是图片 ——
-       * 老版本直接把它当图片拒了，用户看到的只是"这个文件用不了"。
-       *
-       * plan.frames 一定要传下去：网格的最后一排常常排不满，
-       * 那几格是全透明的，当成帧播就是"角色一闪一闪"（见 MascotArt 里的说明）。
-       */
-      if (isVideoFile(file)) {
-        showToast('正在从视频里抽帧，可能要几秒…', 'info', undefined);
-        const v = await videoToSpriteSheet(file);
-        importMascotSheet(v.src, base, v.plan.cols, v.plan.rows, v.plan.fps, v.plan.frames);
-        const d = describeVideoSheet(v, mp.size, dpr);
-        setReport(d);
-        showToast(d.summary, d.notes.length ? 'warn' : 'ok');
-        return;
-      }
-
-      /*
-       * 图片：**能原样保留就原样保留**（见 prepareMascotImage）。
-       * 重新压一遍是有损的二次编码，而且会把动图拍成静态图。
-       * 真的要压时压到 1536 长边 —— 显示高度上限 320px 在 3.5 倍屏上是 1120 物理像素，
-       * 老的 1024 其实差一点点。
-       */
-      const img = await prepareMascotImage(file, 1536, 0.94);
-      importMascotImage(img.src, base);
-      if (img.lostAnimation) {
-        showToast('这张动图太大了（超过 3MB 或 150 万像素），已经压成静态图；'
-          + '想保留动效可以先用工具压一下再导入', 'warn');
-      } else {
-        showToast(img.original
-          ? '已把这张图原样设为角色（没有二次压缩），按住它可以拖到别的位置'
-          : '已把这张图压到 ' + img.width + '×' + img.height + ' 设为角色', 'ok');
-      }
-    } catch (e) {
-      showToast('这个文件用不了：' + (e as Error).message, 'error');
+      /* 导入结果就地留一份：只弹一个提示条太容易错过（帧数、每帧多大都是判断依据） */
+      setReport(await importMascotMedia(f, mp.size));
     } finally {
       setBusy(false);
     }
@@ -151,27 +113,10 @@ export default function MascotPanel() {
     await runCheck();
   }
 
+  /* 导出走共用实现（角色中心里那个按钮用的是同一份） */
   async function exportPack(): Promise<void> {
-    const out = mascotExportText();
-    if (!out) return;
-    if (out.hasRefs) {
-      showToast('素材还没从资产库读出来，稍后再试', 'warn');
-      return;
-    }
-    const r = await saveTextFile({
-      fileName: out.fileName,
-      text: out.text,
-      mime: 'application/json',
-      title: '课表助手角色包 · ' + (pack ? pack.name : ''),
-      dialogTitle: '导出角色包',
-    });
-    if (r === 'shared') showToast('已打开分享面板', 'ok');
-    else if (r === 'saved') showToast('已保存到「文档」目录', 'ok');
-    else if (r === 'cancelled') showToast('已取消', 'info');
-    else showToast('导出失败', 'error');
+    await exportMascotPackFile();
   }
-
-  const states = pack ? providedStates(pack) : [];
 
   /*
    * 角色设置也吃外观锁定。
@@ -210,27 +155,11 @@ export default function MascotPanel() {
       sub={pack ? pack.name : '未设置'}
       desc="放在课表界面上的一个小东西：会呼吸、会眨眼，点一下有反应，可以拖着换位置。默认不显示 —— 导入一个角色包才会出现。"
     >
-      <input
-        ref={packRef} type="file" accept=".json,application/json" style={{ display: 'none' }}
-        onChange={function (e) {
-          const f = e.target.files && e.target.files[0];
-          e.target.value = '';
-          if (f) void onPackFile(f);
-        }}
-      />
       {/*
-        accept 里必须带上 video/*：安卓的相册选择器是按 MIME 过滤的，
-        只写 image/* 的话，用户相册里的 webm 根本不会出现在待选列表里 ——
-        表现就是"想选那个视频，但列表里压根没有它"。
+        文件选择改成"用到时才创建 input"（见 ui/mascotImport.ts 的 pickFile）。
+        两个常驻的隐藏 input 有两个问题：一是取消选择时不会触发 change，
+        界面会一直以为"正在导入"；二是同一段逻辑在角色中心里要再写一遍。
       */}
-      <input
-        ref={imgRef} type="file" accept="image/*,video/*" style={{ display: 'none' }}
-        onChange={function (e) {
-          const f = e.target.files && e.target.files[0];
-          e.target.value = '';
-          if (f) void onImageFile(f);
-        }}
-      />
 
       {/*
         有角色时：左边放一个**活的**角色（和桌面上同一个渲染组件），右边是名字与来源。
@@ -303,94 +232,44 @@ export default function MascotPanel() {
       */}
       <div className={'mascot-rows' + (pack ? '' : ' unlocked')}>
       {/* 只留一个主入口，其余全收进「更多功能」 */}
-      <div className="list-row tap" style={{ cursor: 'pointer' }} onClick={function () { if (packRef.current) packRef.current.click(); }}>
+      <div className="list-row tap" style={{ cursor: 'pointer' }} onClick={function () { void pickAndImportPack(); }}>
         <div>
           <div className="lr-label">导入角色包</div>
           <div className="lr-sub">选一个 .json 文件；内容也支持整段粘贴</div>
         </div>
         <div className="lr-right">›</div>
       </div>
-      <div className="list-row tap" style={{ cursor: 'pointer' }} onClick={function () { setMore(!more); }}>
+      {/*
+        角色的其它动作全部移到了「角色中心」（选 / 做 / 分享三页）。
+        原来这里是一个「更多功能」折叠区，里面塞了七行 —— 展开之后比不展开更乱，
+        而且用户想"换一个角色"时得先在折叠区里找。
+      */}
+      <div className="list-row tap" style={{ cursor: 'pointer' }} onClick={function () { openMascotCenter(); }}>
         <div>
-          <div className="lr-label">更多功能</div>
-          <div className="lr-sub">做一个角色 · 用图或视频 · 粘贴 · 导出 · 位置 · 教学</div>
+          <div className="lr-label">角色中心</div>
+          <div className="lr-sub">换一个 · 做一个 · 分享与获取 —— 角色的所有功能都在这里</div>
         </div>
-        <div className="lr-right">{more ? '⌃' : '⌄'}</div>
+        <div className="lr-right">›</div>
       </div>
 
-      {more ? (
-        <React.Fragment>
-          <div className="list-row tap" style={{ cursor: 'pointer' }} onClick={function () { openMascotEditor(pack ? 'edit' : 'new'); }}>
-            <div>
-              <div className="lr-label">{pack ? '编辑这个角色' : '做一个角色'}</div>
-              <div className="lr-sub">{pack ? '改素材、动作、大小，改完保存就生效' : '填表做一个：选图、调动作、实时预览'}</div>
-            </div>
-            <div className="lr-right">›</div>
+      {/* 「检查这个角色」留在面板里：它是排错用的，不是日常动作 */}
+      {pack ? (
+        <div className="list-row tap" style={{ cursor: 'pointer' }} onClick={function () { void runCheck(); }}>
+          <div>
+            <div className="lr-label">检查这个角色</div>
+            <div className="lr-sub">量一遍：每帧多大、真有几帧、会不会被放大发虚</div>
           </div>
-          <div className="list-row tap" style={{ cursor: 'pointer' }} onClick={function () { if (imgRef.current) imgRef.current.click(); }}>
-            <div>
-              <div className="lr-label">用一张图或一段视频</div>
-              <div className="lr-sub">图片直接当角色；视频（webm / mp4）会自动抽帧做成逐帧动图</div>
-            </div>
-            <div className="lr-right">›</div>
+          <div className="lr-right">{checking ? '…' : '›'}</div>
+        </div>
+      ) : null}
+      {pack ? (
+        <div className="list-row tap" style={{ cursor: 'pointer' }} onClick={function () { void removeMascotAsk(); }}>
+          <div>
+            <div className="lr-label" style={{ color: 'var(--c-danger)' }}>移除角色</div>
+            <div className="lr-sub">素材会一起从本机清掉（角色库里的副本不受影响）；重新导入即可恢复</div>
           </div>
-          <div className="list-row tap" style={{ cursor: 'pointer' }} onClick={function () { setPaste(true); }}>
-            <div>
-              <div className="lr-label">粘贴角色包内容</div>
-              <div className="lr-sub">同学发来的整段内容复制进来即可；相册里找不到 .json 时用这条</div>
-            </div>
-            <div className="lr-right">›</div>
-          </div>
-          {pack ? (
-            <div className="list-row tap" style={{ cursor: 'pointer' }} onClick={function () { void exportPack(); }}>
-              <div>
-                <div className="lr-label">导出角色包</div>
-                <div className="lr-sub">拿到一个内嵌素材的 .json，可以发给别人</div>
-              </div>
-              <div className="lr-right">›</div>
-            </div>
-          ) : null}
-          {/*
-            云端角色的入口也放一条在这里。
-            右上角那个云图标是"全局入口"，但用户是在**这一页**做角色的 ——
-            做完想存起来的时候，入口应该在手边，而不是让他自己想起右上角。
-          */}
-          {cloudConfigured() ? (
-            <div className="list-row tap" style={{ cursor: 'pointer' }} onClick={function () { closeSheets(); openCloudSheet(); }}>
-              <div>
-                <div className="lr-label">云端角色</div>
-                <div className="lr-sub">把角色存到云端（换设备直接用），也可以公开给同学、或使用别人公开的角色</div>
-              </div>
-              <div className="lr-right">›</div>
-            </div>
-          ) : null}
-          {pack ? (
-            <div className="list-row tap" style={{ cursor: 'pointer' }} onClick={function () { void runCheck(); }}>
-              <div>
-                <div className="lr-label">检查这个角色</div>
-                <div className="lr-sub">量一遍：每帧多大、真有几帧、会不会被放大发虚</div>
-              </div>
-              <div className="lr-right">{checking ? '…' : '›'}</div>
-            </div>
-          ) : null}
-          {/* 「放回默认位置」已经提到面板主区域了（用户明确要"一键重置"），这里不再重复一份 */}
-          <div className="list-row tap" style={{ cursor: 'pointer' }} onClick={function () { openManual('mascot'); }}>
-            <div>
-              <div className="lr-label">使用说明书 · 角色</div>
-              <div className="lr-sub">怎么做角色包、视频怎么用、常见错误</div>
-            </div>
-            <div className="lr-right">›</div>
-          </div>
-          {pack ? (
-            <div className="list-row tap" style={{ cursor: 'pointer' }} onClick={function () { void removeMascotAsk(); }}>
-              <div>
-                <div className="lr-label" style={{ color: 'var(--c-danger)' }}>移除角色</div>
-                <div className="lr-sub">素材会一起从本机清掉；重新导入即可恢复</div>
-              </div>
-              <div className="lr-right">›</div>
-            </div>
-          ) : null}
-        </React.Fragment>
+          <div className="lr-right">›</div>
+        </div>
       ) : null}
       </div>
 
@@ -538,6 +417,7 @@ export default function MascotPanel() {
             className="btn primary block" style={{ marginTop: 10 }}
             disabled={pasted.trim().length < 10}
             onClick={function () {
+              /* 粘贴这条路和文件那条走同一个校验（store 里的 importMascotPack） */
               const r = importMascotPack(pasted, '粘贴的角色');
               if (!r.ok) { showToast('导入失败：' + r.error, 'error'); return; }
               setPaste(false);

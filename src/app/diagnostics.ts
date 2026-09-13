@@ -8,6 +8,9 @@
  * 用法：?diag=1            在当前视口测
  *       ?diag=1&w=360,390  在 360 / 390 宽的 iframe 里分别测
  */
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import WidgetPreview from '../ui/WidgetPreview';
 import {
   getState, historyEntries, openHistory, openOverride, patchTheme, setData, setTab, storeEmitCount, toggleTask, undoTo,
   upsertOverride,
@@ -15,6 +18,7 @@ import {
 import { dayOfWeekOf, parseISODate, todayISO, weekLimitOf, weekMatches, weekOfDate } from '../core/engine';
 import { renderCounts } from './renderCount';
 import { UPCOMING_MAX, buildWidgetPayload, widgetBoundaryMs } from '../platform/widget';
+import { WIDGET_PRESETS, planForPreset, previewRows } from '../platform/widgetLayout';
 import { renderTimetableImage } from '../ui/timetableImage';
 import { platformName } from '../platform/nativeBridge';
 
@@ -488,6 +492,21 @@ function runWidgetCheck(): void {
       : '下一节=（没有更多课了）',
     '桌面下次自刷新=' + hm(boundary) + '（距现在 ' + Math.round((boundary - now) / 60000) + ' 分钟）',
   ];
+  /*
+   * 四个尺寸各自会显示几行 —— 与原生侧 WidgetSize 同一套判据。
+   * 这一行是"拉大之后到底会不会多显示"的答案：用户在桌面上看到的行数，
+   * 应该与这里写的一模一样，对不上就是两边判据漂了。
+   */
+  for (const preset of WIDGET_PRESETS) {
+    const plan = planForPreset(preset);
+    const view = previewRows(p, now, 6);
+    lines.push('WIDGET ' + preset.label + '（' + plan.widthDp + 'x' + plan.heightDp + 'dp）'
+      + ' 列=' + (preset.kind === 'next' ? plan.extraRows : plan.listRows)
+      + (preset.kind === 'next' ? ' 节（拉高才出现）' : ' 节')
+      + (plan.narrow ? ' 窄：收起地点列' : '')
+      + ' —— 实际可列 ' + view.rows.length + ' 节'
+      + (view.next ? '，顶上=' + view.next.title : '，顶上=（没有下一节）'));
+  }
   const text = lines.join(' | ');
   const pre = document.createElement('pre');
   pre.id = 'widgetcheck';
@@ -673,6 +692,90 @@ function runTodayCancelCheck(send: (text: string) => void): void {
   }, 900);
 }
 
+/**
+ * 小组件尺寸预览的自检（?wp=1）。
+ *
+ * 那个预览面板只在 **Android 版**渲染（网页版没有桌面小组件），
+ * 而无头检查跑的是网页产物 —— 所以这里把它单独挂出来量一次：
+ * 四个尺寸的框是不是真的 110×110 / 110×180 / 250×110 / 250×180，
+ * 里面的行数是不是与判据一致，有没有横向溢出。
+ */
+/** 本地日期 → YYYY-MM-DD（自检里拼合成数据用，避免又引入一个依赖） */
+function toIsoLocal(d: Date): string {
+  return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+}
+
+function runWidgetPreviewCheck(): void {
+  let send = function (_text: string): void { /* 默认不回传 */ };
+  try { send = makeReporter(new URLSearchParams(window.location.search).get('report') || ''); } catch (e) { /* 忽略 */ }
+  setTimeout(function () {
+    const host = document.createElement('div');
+    host.id = 'wpcheck';
+    host.style.cssText = 'position:relative;z-index:9999;background:#fff;padding:10px;width:290px;';
+    document.body.appendChild(host);
+    const payload = buildWidgetPayload(getState().data, new Date());
+    /*
+     * 真实数据今天可能一节课都没有（周末、假期），那行排版就量不到 ——
+     * 所以**再挂一份合成数据**：顶上有一节正在上的课，后面还排着两节。
+     * 两份都量，报出来时能看出"是没数据"还是"有数据但排版不对"。
+     */
+    const nowMs = Date.now();
+    const iso = toIsoLocal(new Date(nowMs));
+    const mk = function (title: string, minutes: number, loc: string) {
+      return {
+        courseId: 'c-' + title, title: title, start: '09:00', end: '09:45', location: loc,
+        period: '第 1 节', dayLabel: '周一', date: iso,
+        startMs: nowMs + minutes * 60000, endMs: nowMs + (minutes + 45) * 60000,
+      };
+    };
+    const fake = {
+      term: '自检用示例学期', todayIso: iso,
+      today: [mk('高等数学 A', -20, '一教 A101'), mk('程序设计基础', 60, '机房 302'), mk('大学英语 III', 180, '外语楼 205')],
+      upcoming: [mk('高等数学 A', -20, '一教 A101'), mk('程序设计基础', 60, '机房 302'), mk('大学英语 III', 180, '外语楼 205')],
+    };
+    createRoot(host).render(React.createElement(WidgetPreview, { payload: payload }));
+    setTimeout(function () {
+      const frames = host.querySelectorAll('.wp-frame');
+      const caps: string[] = [];
+      let overflow = false;
+      for (let i = 0; i < frames.length; i++) {
+        const el = frames[i] as HTMLElement;
+        const r = el.getBoundingClientRect();
+        const rows = el.querySelectorAll('.wp-row').length;
+        caps.push(el.getAttribute('data-size') + '=' + Math.round(r.width) + 'x' + Math.round(r.height) + '/' + rows + '行');
+        if (r.right > window.innerWidth + 1) overflow = true;
+      }
+      const text = host.textContent || '';
+      send('WPCHECK 真实数据 框架=' + caps.join(' ') + ' 溢出=' + (overflow ? 'YES' : 'no')
+        + ' 未渲染的星号=' + (text.indexOf('**') >= 0 ? 'YES' : 'no'));
+      /* 第二份：合成数据（保证今天有课），量的是行本身的排版 */
+      const host2 = document.createElement('div');
+      host2.id = 'wpcheck2';
+      host2.style.cssText = 'position:relative;z-index:9999;background:#fff;padding:10px;width:290px;';
+      document.body.appendChild(host2);
+      createRoot(host2).render(React.createElement(WidgetPreview, { payload: fake }));
+      setTimeout(function () {
+        const f2 = host2.querySelectorAll('.wp-frame');
+        const caps2: string[] = [];
+        let over2 = false;
+        for (let i = 0; i < f2.length; i++) {
+          const el = f2[i] as HTMLElement;
+          const r = el.getBoundingClientRect();
+          const rows = el.querySelectorAll('.wp-row').length;
+          /* 行里的课程名有没有被挤没：宽度小于 8px 就是被挤没了 */
+          const titles = el.querySelectorAll('.wp-title');
+          let minTitle = 999;
+          for (let j = 0; j < titles.length; j++) minTitle = Math.min(minTitle, (titles[j] as HTMLElement).getBoundingClientRect().width);
+          caps2.push(el.getAttribute('data-size') + '=' + Math.round(r.width) + 'x' + Math.round(r.height)
+            + '/' + rows + '行' + (minTitle === 999 ? '' : ' 最窄课程名=' + Math.round(minTitle) + 'px'));
+          if (r.right > window.innerWidth + 1) over2 = true;
+        }
+        send('WPCHECK 合成数据 框架=' + caps2.join(' ') + ' 溢出=' + (over2 ? 'YES' : 'no'));
+      }, 500);
+    }, 700);
+  }, 1200);
+}
+
 export function runDiagnostics(): void {
   const params = new URLSearchParams(window.location.search);
 
@@ -684,6 +787,7 @@ export function runDiagnostics(): void {
   if (params.get('framecheck') === '1') runFrameCheck();
   if (params.get('histcheck')) runHistoryCheck(Number(params.get('histcheck')));
   if (params.get('ovcheck') === '1') runOverrideCheck();
+  if (params.get('wp') === '1') runWidgetPreviewCheck();
   if (params.get('behavecheck')) {
     const sec = Number(params.get('behavecheck'));
     runBehaviorCheck(isFinite(sec) && sec >= 5 ? Math.min(180, sec) : 30);

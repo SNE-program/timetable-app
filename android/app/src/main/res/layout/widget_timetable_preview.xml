@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  小组件选择器里的**预览图**（android:previewLayout，Android 12+）。
+
+  以前没有预览：选择器里只有一个空白方块，用户根本不知道放上去会显示什么 ——
+  "这个组件没有任何用处"有一半是这么来的。这里用一份示例内容画出来，
+  让他在拖到桌面之前就看清楚长什么样。
+
+  只是静态布局，不参与运行时渲染（运行时的内容由 provider 用 RemoteViews 填）。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_bg"
+    android:padding="10dp">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:singleLine="true"
+        android:textSize="9sp"
+        android:textColor="#8A8F98"
+        android:text="2026 春季学期 · 第 3 周" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingTop="2dp"
+        android:paddingBottom="4dp">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:textColor="#1D2129"
+                android:text="高等数学 A" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:textSize="10sp"
+                android:textColor="#8A8F98"
+                android:text="一教 A101 · 08:00-09:40" />
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:textSize="17sp"
+            android:textStyle="bold"
+            android:textColor="#1677FF"
+            android:text="00:12" />
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#1A000000" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingTop="1dp"
+        android:paddingBottom="1dp">
+
+        <TextView
+            android:layout_width="38dp"
+            android:layout_height="wrap_content"
+            android:singleLine="true"
+            android:textSize="10sp"
+            android:textStyle="bold"
+            android:textColor="#1677FF"
+            android:text="10:00" />
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:textSize="11.5sp"
+            android:textColor="#1D2129"
+            android:text="程序设计基础" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
+            android:singleLine="true"
+            android:maxWidth="84dp"
+            android:textSize="10sp"
+            android:textColor="#8A8F98"
+            android:text="机房 302" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingTop="1dp"
+        android:paddingBottom="1dp">
+
+        <TextView
+            android:layout_width="38dp"
+            android:layout_height="wrap_content"
+            android:singleLine="true"
+            android:textSize="10sp"
+            android:textStyle="bold"
+            android:textColor="#1677FF"
+            android:text="14:00" />
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:textSize="11.5sp"
+            android:textColor="#1D2129"
+            android:text="大学英语 III" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
+            android:singleLine="true"
+            android:maxWidth="84dp"
+            android:textSize="10sp"
+            android:textColor="#8A8F98"
+            android:text="外语楼 205" />
+    </LinearLayout>
+</LinearLayout>

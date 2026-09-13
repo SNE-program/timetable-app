@@ -1,11 +1,33 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  宽的那个小组件（下一节课 + 接下来几节课）。
+
+  几个字段为什么这么写：
+
+    updatePeriodMillis=0：数据由应用主动推送 + 到点自己重画（WidgetRefresh 排的闹钟），
+      让系统每 30 分钟唤醒一次纯属浪费电。
+
+    previewLayout / previewImage：**选择器里的预览图**。
+      Android 12+ 用 previewLayout（我们画一份示例内容），更老的系统用 previewImage（应用图标）。
+      没有预览时选择器里只有一块空白，用户不知道拖上去会看到什么 ——
+      "这个组件没有任何用处"有一半是这么来的。
+
+    minResizeWidth/Height：允许拉大，但不允许拉到放不下一行字。
+    maxResizeWidth/Height：给足上限，拉大之后能多显示几节课（见 WidgetSize）。
+-->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:minWidth="250dp"
     android:minHeight="110dp"
     android:targetCellWidth="4"
     android:targetCellHeight="2"
+    android:minResizeWidth="110dp"
+    android:minResizeHeight="110dp"
+    android:maxResizeWidth="460dp"
+    android:maxResizeHeight="460dp"
     android:updatePeriodMillis="0"
     android:initialLayout="@layout/widget_timetable"
+    android:previewLayout="@layout/widget_timetable_preview"
+    android:previewImage="@mipmap/ic_launcher"
     android:resizeMode="horizontal|vertical"
     android:widgetCategory="home_screen"
     android:description="@string/widget_timetable_desc" />

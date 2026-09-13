@@ -160,8 +160,12 @@ export interface AppState {
   exportSheet: boolean;
   /** 角色（内存里的素材是 data URI；null = 没有导入过，界面上什么都不显示） */
   mascot: MascotPack | null;
+  /** 本机角色库：存下来的几个角色，随时切换（见 MascotLibEntry） */
+  mascotLib: MascotLibEntry[];
   /** 角色编辑器：'new' 从空白开始，'edit' 载入当前角色 */
   mascotEditor: 'new' | 'edit' | null;
+  /** 角色中心（选 / 做 / 分享与获取三个标签页）—— 角色相关的入口都收在这里 */
+  mascotCenter: false | MascotCenterTab;
   /** 从 Excel / CSV 导入课表 */
   importSheet: boolean;
   /** 使用说明书（应用内文档） */
@@ -172,6 +176,8 @@ export interface AppState {
   changelogSheet: boolean;
   /** 操作历史面板（撤销/重做的可读版本） */
   historySheet: boolean;
+  /** 快捷键说明弹层（从命令表渲染，见 app/commands.ts） */
+  shortcutSheet: boolean;
   toast: Toast | null;
   confirm: ConfirmRequest | null;
   /** 撤销/重做栈的摘要，供界面显示按钮可用状态 */
@@ -189,6 +195,8 @@ const KEY_THEME = 'timetable.theme.v1';
 const KEY_DATA = 'timetable.data.v2';
 const KEY_PREFS = 'timetable.prefs.v1';
 const KEY_MASCOT = 'timetable.mascot.v1';
+/** 本机角色库：可以存好几个角色，随时切换（见 mascotLibrary） */
+const KEY_MASCOT_LIB = 'timetable.mascot.lib.v1';
 
 function loadTheme(): Theme {
   let theme: Theme = defaultTheme();
@@ -591,6 +599,80 @@ function loadMascot(): MascotPack | null {
   }
 }
 
+/**
+ * 本机角色库。
+ *
+ * ## 为什么要有它
+ *
+ * 原来"换角色"只有一条路：**重新导入一次**。于是用户想在同桌的角色和自己的角色之间
+ * 来回换，就得把文件翻出来导两遍 —— 而"选取"这件事本来该是一下点的事。
+ * 现在导入 / 从云端取回 / 自己做出来的角色都可以**存进本机库**，之后一键切换。
+ *
+ * ## 只存引用，不存整包
+ *
+ * 和大图一样：素材抽进资产库（SQLite），这里只留 `asset:<key>` 引用，
+ * 所以一个库条目只有几 KB。代价是**资产不能乱删** —— 见 applyMascot 里的 keep 列表：
+ * 换角色时只回收"当前角色和库里都不再用"的那几张。
+ *
+ * ## 上限
+ *
+ * 最多 6 个。一个角色包动辄几 MB，库里塞满十几个，资产库会悄悄涨到几十 MB，
+ * 而用户在界面上完全看不出来 —— 超过上限时丢掉最旧的那个，并且明说丢掉的是谁。
+ */
+export interface MascotLibEntry {
+  id: string;
+  name: string;
+  pack: MascotPack;
+  addedAt: number;
+  /** 从哪来的（导入 / 云端 / 分享码 / 自己做），列表里显示一行就能分辨 */
+  from: string;
+}
+
+/** 角色库上限。理由见上面的注释 */
+export const MASCOT_LIB_MAX = 6;
+
+function loadMascotLib(): MascotLibEntry[] {
+  try {
+    const raw = localStorage.getItem(KEY_MASCOT_LIB);
+    if (!raw) return [];
+    const arr = JSON.parse(raw) as MascotLibEntry[];
+    if (!Array.isArray(arr)) return [];
+    const out: MascotLibEntry[] = [];
+    for (const e of arr) {
+      if (!e || typeof e.id !== 'string') continue;
+      const r = validateMascotPack(e.pack);
+      /* 读不懂的那条跳过而不是报错：一份坏条目不该让整库都打不开 */
+      if (!r.ok || !r.pack) continue;
+      out.push({ id: e.id, name: e.name || r.pack.name, pack: r.pack, addedAt: e.addedAt || 0, from: e.from || '' });
+    }
+    return out.slice(0, MASCOT_LIB_MAX);
+  } catch (e) {
+    return [];
+  }
+}
+
+function persistMascotLib(list: MascotLibEntry[]): void {
+  try {
+    const slim = list.map(function (e) {
+      const r = extractMascotAssets(e.pack);
+      for (const a of r.assets) putAsset(a.key, a.uri);
+      return { id: e.id, name: e.name, pack: r.pack, addedAt: e.addedAt, from: e.from };
+    });
+    const json = JSON.stringify(slim);
+    localStorage.setItem(KEY_MASCOT_LIB, json);
+    kvSet(KEY_MASCOT_LIB, json);
+  } catch (e) {
+    showToast('角色库没能保存到本机（本地存储已满），可以先把不用的角色删掉', 'warn');
+  }
+}
+
+/** 库里所有条目占用的资产 key —— 换角色时这些要保住 */
+function libAssetKeys(list: MascotLibEntry[]): string[] {
+  const out: string[] = [];
+  for (const e of list) for (const k of collectMascotKeys(e.pack)) if (out.indexOf(k) < 0) out.push(k);
+  return out;
+}
+
 function initialState(): AppState {
   const data = Object.assign({}, loadData());
   data.term = Object.assign({}, data.term, { periodSchemeId: initialScheme(data) });
@@ -621,6 +703,7 @@ function initialState(): AppState {
     })() : null,
     changelogSheet: openParam() === 'changelog',
     mascot: loadMascot(),
+    mascotLib: loadMascotLib(),
     /*
      * ?open=mascot-editor 进"做一个角色"（空表单）；
      * ?open=mascot-edit 进"编辑这个角色"（把当前角色倒进表单）。
@@ -628,11 +711,20 @@ function initialState(): AppState {
      * 而窄屏上真正容易破版的恰恰是它们。
      */
     mascotEditor: openParam() === 'mascot-editor' ? 'new' : (openParam() === 'mascot-edit' ? 'edit' : null),
+    /* ?open=mascot-center[&mtab=share] 直接摊开角色中心，方便窄屏上量这三个页面 */
+    mascotCenter: openParam() === 'mascot-center'
+      ? (function () {
+        const t = (function () { try { return new URLSearchParams(window.location.search).get('mtab'); } catch (e) { return null; } })();
+        return t === 'make' || t === 'share' ? t : 'pick';
+      })()
+      : false,
     toast: null,
     confirm: null,
     history: { undo: 0, redo: 0, lastLabel: null },
     /* ?open=history 直接摊开「操作历史」，方便在窄屏上量这个面板（只有带参数时才开） */
     historySheet: openParam() === 'history',
+    /* ?open=shortcuts 直接摊开快捷键说明，方便窄屏上量它 */
+    shortcutSheet: openParam() === 'shortcuts',
     notify: initialNotify(),
     upcoming: [],
     cloud: initialCloud(loadPrefs().autoLogin !== false),
@@ -939,6 +1031,9 @@ export function undo(): boolean {
 }
 
 /* ------------------------------ 操作历史（可读版） ------------------------------ */
+
+export function openShortcutSheet(): void { setState({ shortcutSheet: true }); }
+export function closeShortcutSheet(): void { setState({ shortcutSheet: false }); }
 
 export function openHistory(): void { setState({ historySheet: true }); }
 export function closeHistory(): void { setState({ historySheet: false }); }
@@ -1334,7 +1429,12 @@ function persistMascot(pack: MascotPack | null): string[] {
 function applyMascot(pack: MascotPack | null, hidden?: boolean): void {
   const oldKeys = collectMascotKeys(state.mascot);
   setState({ mascot: pack });
-  const keep = persistMascot(pack);
+  /*
+   * keep = 新角色用到的 key + **角色库里所有条目用到的 key**。
+   * 少了后面那一半，切换角色会把库里别的角色的素材一起删掉 ——
+   * 表现是"库里的角色点开是空的"，而且完全看不出是谁删的。
+   */
+  const keep = persistMascot(pack).concat(libAssetKeys(state.mascotLib));
   /*
    * 素材预热放在落盘之后，而且它自己会一张一张地让出主线程
    * （见 mascot/prewarm.ts）—— 换角色、用别人的云端角色都不会再"顿一下"。
@@ -1503,6 +1603,28 @@ export function patchMascotPrefs(patch: Partial<MascotPrefs>): void {
 }
 
 /** 打开角色编辑器；'edit' 会把当前角色倒进表单里 */
+/**
+ * 角色中心的三个标签页。
+ *
+ * 为什么要有这个分类：角色的入口原来散在三处 —— 面板里「更多功能」、
+ * 右上角云弹层里的「云端角色」、以及文件导入那一路。用户想"换一个角色"时
+ * 得先猜"这件事属于哪一块"。现在按**他想干什么**分三页：
+ *   pick  —— 我有哪些角色，换一个
+ *   make  —— 怎么弄一个新角色
+ *   share —— 和同学互相传（拿码取 / 生成码）
+ */
+export type MascotCenterTab = 'pick' | 'make' | 'share';
+
+export function openMascotCenter(tab?: MascotCenterTab): void {
+  setState({ mascotCenter: tab || 'pick' });
+  /* 打开就顺手拉一次云端列表（有缓存，重复打开不会重复请求） */
+  if (cloudConfigured()) void cloudLoadMascots();
+}
+
+export function setMascotCenterTab(tab: MascotCenterTab): void { setState({ mascotCenter: tab }); }
+
+export function closeMascotCenter(): void { setState({ mascotCenter: false }); }
+
 export function openMascotEditor(mode: 'new' | 'edit'): void {
   setState({ mascotEditor: mode });
 }
@@ -1524,9 +1646,101 @@ export function mascotExportText(): { fileName: string; text: string; hasRefs: b
   return { fileName: r.fileName, text: r.text, hasRefs: r.hasRefs };
 }
 
-/** 角色占用的资产 key，清理孤儿素材时要用 */
+/**
+ * 本机角色库的对外接口。
+ *
+ * 三条约束，都是产品决定：
+ *   1. **存进去是显式动作** —— 不自动把每次导入都收进库里，否则库里会堆满试用过的角色，
+ *      而且它们占的资产会一直留着（见 applyMascot 的 keep）。
+ *   2. **上限 ${MASCOT_LIB_MAX} 个**，超了就丢最旧的，并且告诉用户丢的是谁。
+ *   3. 删除条目时**精确回收**只有它用到的素材（当前角色和别的条目还在用的不碰）。
+ */
+export function mascotLibrary(): MascotLibEntry[] {
+  return state.mascotLib;
+}
+
+/** 同名 + 同一批素材就算同一个角色，避免反复存出重复条目 */
+function libSignature(pack: MascotPack): string {
+  return pack.name + '|' + collectMascotKeys(pack).slice().sort().join(',');
+}
+
+export function saveCurrentMascotToLibrary(from: string): { ok: boolean; error?: string } {
+  const pack = state.mascot;
+  if (!pack) return { ok: false, error: '本机还没有角色' };
+  const sig = libSignature(pack);
+  const dup = state.mascotLib.filter(function (e) { return libSignature(e.pack) === sig; })[0];
+  if (dup) return { ok: false, error: '「' + dup.name + '」已经在角色库里了' };
+  let next = state.mascotLib.concat([{
+    id: 'ml' + Date.now() + '-' + Math.round(Math.random() * 1000),
+    name: pack.name || '未命名角色',
+    pack: pack,
+    addedAt: Date.now(),
+    from: from,
+  }]);
+  let dropped: MascotLibEntry | null = null;
+  if (next.length > MASCOT_LIB_MAX) {
+    dropped = next[0];
+    next = next.slice(next.length - MASCOT_LIB_MAX);
+  }
+  setState({ mascotLib: next });
+  persistMascotLib(next);
+  /* 被挤掉的那条不再需要它的素材 */
+  if (dropped) gcLibraryAssets(next, collectMascotKeys(dropped.pack));
+  return { ok: true, error: dropped ? '库里放不下这么多，已经挤掉最旧的「' + dropped.name + '」' : undefined };
+}
+
+/**
+ * 回收素材。
+ *
+ * `candidates` 是**这次操作可能不再被用到**的那些 key —— 精确回收，不做全库扫描：
+ * 全局扫描一旦算错 keep 列表，删掉的就是还在用的图（这条以前踩过）。
+ */
+function gcLibraryAssets(list: MascotLibEntry[], candidates: string[]): void {
+  const used = libAssetKeys(list).concat(collectMascotKeys(state.mascot));
+  for (const k of candidates) {
+    if (used.indexOf(k) < 0) deleteAsset(k);
+  }
+}
+
+export function useMascotFromLibrary(id: string): boolean {
+  const e = state.mascotLib.filter(function (x) { return x.id === id; })[0];
+  if (!e) return false;
+  /*
+   * 库里存的是 asset: 引用（省地方），用的时候要先把 data URI 找回来 ——
+   * 和启动时还原当前角色是同一件事，素材真丢了就明说，不留空壳。
+   */
+  const hydrated = hydrateMascot(e.pack, getAsset);
+  if (!hydrated.states.idle) {
+    showToast('「' + e.name + '」的素材已经不在了，需要重新导入一次', 'warn');
+    return false;
+  }
+  applyMascot(hydrated, false);
+  showToast('已换成「' + e.name + '」' + (e.from ? '（' + e.from + '）' : ''), 'ok');
+  return true;
+}
+
+export function renameMascotFromLibrary(id: string, name: string): void {
+  const clean = (name || '').trim().slice(0, 24);
+  if (!clean) return;
+  const next = state.mascotLib.map(function (e) {
+    return e.id === id ? Object.assign({}, e, { name: clean }) : e;
+  });
+  setState({ mascotLib: next });
+  persistMascotLib(next);
+}
+
+export function removeMascotFromLibrary(id: string): void {
+  const gone = state.mascotLib.filter(function (e) { return e.id === id; })[0];
+  const next = state.mascotLib.filter(function (e) { return e.id !== id; });
+  setState({ mascotLib: next });
+  persistMascotLib(next);
+  /* 只有它用到的素材精确回收 —— 当前角色和别的条目在用的不能碰 */
+  gcLibraryAssets(next, gone ? collectMascotKeys(gone.pack) : []);
+}
+
+/** 库里所有条目 + 当前角色占用的资产 key（清理孤儿素材时要用） */
 export function mascotAssetKeys(): string[] {
-  return collectMascotKeys(state.mascot);
+  return libAssetKeys(state.mascotLib).concat(collectMascotKeys(state.mascot));
 }
 
 /* ------------------------------ 偏好 ------------------------------ */
@@ -2079,6 +2293,89 @@ export async function cloudSetPassword(password: string): Promise<boolean> {
 }
 
 
+/* ------------------------------ 分享与获取（角色中心） ------------------------------ */
+
+/** 最近用过的分享码：换设备、手滑关掉面板之后不用再问同学要一遍 */
+const KEY_CODES = 'timetable.codes.v1';
+const CODES_MAX = 6;
+
+export function recentShareCodes(): string[] {
+  try {
+    const raw = localStorage.getItem(KEY_CODES);
+    const arr = raw ? JSON.parse(raw) as string[] : [];
+    return Array.isArray(arr) ? arr.filter(function (x) { return typeof x === 'string'; }).slice(0, CODES_MAX) : [];
+  } catch (e) { return []; }
+}
+
+export function pushRecentShareCode(code: string): void {
+  const c = normalizeShareCode(code);
+  if (!c) return;
+  const next = [c].concat(recentShareCodes().filter(function (x) { return x !== c; })).slice(0, CODES_MAX);
+  try {
+    const json = JSON.stringify(next);
+    localStorage.setItem(KEY_CODES, json);
+    kvSet(KEY_CODES, json);
+  } catch (e) { /* 存不下就算了，只是少一份便利 */ }
+}
+
+export function forgetRecentShareCode(code: string): void {
+  const next = recentShareCodes().filter(function (x) { return x !== code; });
+  try { localStorage.setItem(KEY_CODES, JSON.stringify(next)); } catch (e) { /* 忽略 */ }
+  /* 界面上的那份列表由调用方自己更新（它持有本地 state），这里只负责落盘 */
+}
+
+/**
+ * 把本机当前角色传上云端，**并顺手生成分享码**。
+ *
+ * 原来这是两步：先在「云端角色」里点上传，再在那一行上点「分享」——
+ * 中间那一步里用户很容易以为"传上去就等于发给别人了"。
+ * 想分享的人要的就是一个码，那就一步给他。
+ */
+export async function cloudShareCurrent(name: string): Promise<boolean> {
+  const s = state.cloud.session;
+  if (!cloudConfigured() || !s) {
+    showToast('先登录才能把角色传到云端；不想登录就导出角色包发给同学', 'info');
+    return false;
+  }
+  const pack = state.mascot;
+  if (!pack) { showToast('本机还没有角色', 'warn'); return false; }
+  const q = state.cloud.quota;
+  if (q && !q.unlimited && q.used >= q.limit) {
+    setCloud({ mascotsError: '云端角色已经 ' + q.used + ' / ' + q.limit + '：先在列表里删掉一个再传' });
+    showToast('云端角色名额满了，先删一个', 'warn');
+    return false;
+  }
+  setCloud({ mascotsStage: 'upload', mascotsError: '' });
+  try {
+    const token = await cloudToken();
+    const row = await uploadMascot(token, s.user.id, pack, name || pack.name || '未命名角色', false);
+    setCloud({ mascotsStage: 'share' });
+    const code = await setMascotShare(token, row.id, true);
+    await cloudLoadMascots(true);
+    setCloud({ mascotsStage: '', shareSheet: code ? { id: row.id, name: row.name, code: code } : null });
+    if (code) pushRecentShareCode(code);
+    return !!code;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    setCloud({ mascotsStage: '', mascotsError: msg });
+    showToast(msg, 'error');
+    return false;
+  }
+}
+
+/** 复制一段可以直接发给同学的文本（码 + 一句话说明），比只发一串码清楚 */
+export async function copyShareText(code: string, name: string): Promise<boolean> {
+  const text = '课表助手角色「' + name + '」的分享码：' + code
+    + '\n在「设置 → 角色 → 分享与获取」里粘进去就能用（不用注册）。';
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch (e) { /* 退化由调用方处理 */ }
+  return false;
+}
+
 /* ------------------------------ 云端角色 ------------------------------ */
 
 export function openCloudSheet(): void {
@@ -2325,6 +2622,8 @@ export async function cloudUseShareCode(raw: string): Promise<boolean> {
     await nextPaint();
     const applied = importMascotPackObject(r.pack, row.name, r.warnings);
     if (!applied.ok) throw new Error(applied.error || '这个角色包用不了');
+    /* 记一笔：换设备或手滑关掉面板时不用再问同学要一遍码 */
+    pushRecentShareCode(code);
     setCloud({ mascotsStage: '', sheet: false });
     showToast('已用上「' + row.name + '」' + (applied.warnings.length ? '（' + applied.warnings.length + ' 条提示）' : ''), 'ok');
     return true;

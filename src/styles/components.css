@@ -1437,3 +1437,56 @@ input[type="range"].rng::-moz-range-thumb { width: 12px; height: 12px; border-ra
 .log-tag.fix { color: var(--c-danger); border-color: var(--c-danger); }
 .log-text { font-size: var(--fs-sm); line-height: 1.8; }
 
+
+/* ------------------------------ 小组件尺寸预览 ------------------------------ */
+/*
+ * 应用内画的小组件预览（设置 → 桌面小组件）。
+ *
+ * 尺寸是**真的**：1dp 当 1px 用，2×2 就是 110×110、4×2 是 250×110 ——
+ * 与桌面上系统给的那块地方同一个数。配色也照抄原生布局里的固定色
+ * （小组件本身不跟随深浅色主题，用纯色是为了在任何壁纸上都看得清）。
+ */
+.wp-grid { display: flex; flex-wrap: wrap; gap: 14px; padding: 2px 0 10px; }
+.wp-item { display: flex; flex-direction: column; gap: 6px; }
+.wp-frame { width: 110px; height: 110px; flex: 0 0 auto; }
+.wp-frame[data-size="2×3"] { height: 180px; }
+.wp-frame[data-size="4×2"] { width: 250px; }
+.wp-frame[data-size="4×3"] { width: 250px; height: 180px; }
+.wp-card {
+  width: 100%; height: 100%; box-sizing: border-box; overflow: hidden;
+  display: flex; flex-direction: column;
+  background: #FBFBFC; border: 1px solid #E2E3E6; border-radius: 12px; padding: 10px;
+}
+.wp-term { font-size: 9px; color: #8A8F98; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wp-next { display: flex; align-items: center; gap: 8px; padding: 2px 0 4px; }
+.wp-next-main { min-width: 0; flex: 1 1 auto; }
+.wp-next-title {
+  font-size: 13px; font-weight: 700; color: #1D2129;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.wp-next-sub { font-size: 10px; color: #8A8F98; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wp-count { flex: 0 0 auto; font-size: 17px; font-weight: 700; color: #1677FF; }
+.wp-sep { height: 1px; background: rgba(0,0,0,.1); }
+.wp-row { display: flex; align-items: center; gap: 6px; padding: 1px 0; min-width: 0; }
+.wp-time { flex: 0 0 auto; font-size: 10px; font-weight: 700; color: #1677FF; }
+.wp-title {
+  flex: 1 1 auto; min-width: 0; font-size: 11.5px; color: #1D2129;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.wp-where {
+  flex: 0 0 auto; max-width: 84px; font-size: 10px; color: #8A8F98;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.wp-empty { margin: auto 0; text-align: center; font-size: 12px; color: #8A8F98; }
+.wp-cap { max-width: 250px; font-size: var(--fs-xs); color: var(--c-text-2); line-height: 1.5; }
+.wp-note { color: var(--c-text-3); }
+
+/* 快捷键的键位样式：像键帽，一眼能和正文区分开 */
+.kbd {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 26px; height: 24px; padding: 0 7px;
+  border: 1px solid var(--c-border-strong); border-bottom-width: 2px;
+  border-radius: 6px; background: var(--c-surface-2);
+  font-size: var(--fs-xs); font-weight: 700; color: var(--c-text-2);
+  white-space: nowrap;
+}

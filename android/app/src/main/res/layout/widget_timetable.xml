@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  4×2：下一节课 + 今天剩下的课。
+  宽的那个小组件：下一节课 + 接下来几节课。
 
   三行课程是**写死在布局里的**，代码只切换可见性与文字 —— 不用
   RemoteViews.addView。原因有两个：
@@ -10,6 +10,11 @@
 
   注意每行的子控件 id 必须独立。用 <include> 复用会让三行共用同一批 id，
   RemoteViews 按 id 查找时永远只命中第一行，三行会显示同样的内容。
+
+  v1.9.6 把行高与内边距收紧了一档（内边距 12→10、字号与行距各减一点）：
+  按桌面给的 110dp 高度算，原来固定部分就占掉 80dp，只塞得下一行，
+  后两行其实是被裁到组件外面的 —— 用户看到的是"只显示了一节课"。
+  现在同样高度能踏实放下两行，第三行留给拉高之后的尺寸（见 WidgetSize）。
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
@@ -17,7 +22,7 @@
     android:layout_height="match_parent"
     android:orientation="vertical"
     android:background="@drawable/widget_bg"
-    android:padding="12dp">
+    android:padding="10dp">
 
     <TextView
         android:id="@+id/widget_term"
@@ -25,7 +30,7 @@
         android:layout_height="wrap_content"
         android:singleLine="true"
         android:ellipsize="end"
-        android:textSize="10sp"
+        android:textSize="9sp"
         android:textColor="#8A8F98"
         android:text="课表助手" />
 
@@ -35,8 +40,8 @@
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:paddingTop="4dp"
-        android:paddingBottom="6dp">
+        android:paddingTop="2dp"
+        android:paddingBottom="4dp">
 
         <LinearLayout
             android:layout_width="0dp"
@@ -50,7 +55,7 @@
                 android:layout_height="wrap_content"
                 android:singleLine="true"
                 android:ellipsize="end"
-                android:textSize="14sp"
+                android:textSize="13sp"
                 android:textStyle="bold"
                 android:textColor="#1D2129" />
 
@@ -60,7 +65,7 @@
                 android:layout_height="wrap_content"
                 android:singleLine="true"
                 android:ellipsize="end"
-                android:textSize="11sp"
+                android:textSize="10sp"
                 android:textColor="#8A8F98" />
         </LinearLayout>
 
@@ -69,7 +74,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="8dp"
-            android:textSize="18sp"
+            android:textSize="17sp"
             android:textStyle="bold"
             android:textColor="#1677FF" />
     </LinearLayout>
@@ -85,15 +90,15 @@
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:paddingTop="2dp"
-        android:paddingBottom="2dp">
+        android:paddingTop="1dp"
+        android:paddingBottom="1dp">
 
         <TextView
             android:id="@+id/widget_r1_time"
-            android:layout_width="42dp"
+            android:layout_width="38dp"
             android:layout_height="wrap_content"
             android:singleLine="true"
-            android:textSize="11sp"
+            android:textSize="10sp"
             android:textColor="#1677FF"
             android:textStyle="bold" />
 
@@ -104,7 +109,7 @@
             android:layout_weight="1"
             android:singleLine="true"
             android:ellipsize="end"
-            android:textSize="12sp"
+            android:textSize="11.5sp"
             android:textColor="#1D2129" />
 
         <TextView
@@ -114,8 +119,8 @@
             android:layout_marginStart="6dp"
             android:singleLine="true"
             android:ellipsize="end"
-            android:maxWidth="92dp"
-            android:textSize="11sp"
+            android:maxWidth="84dp"
+            android:textSize="10sp"
             android:textColor="#8A8F98" />
     </LinearLayout>
 
@@ -125,15 +130,15 @@
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:paddingTop="2dp"
-        android:paddingBottom="2dp">
+        android:paddingTop="1dp"
+        android:paddingBottom="1dp">
 
         <TextView
             android:id="@+id/widget_r2_time"
-            android:layout_width="42dp"
+            android:layout_width="38dp"
             android:layout_height="wrap_content"
             android:singleLine="true"
-            android:textSize="11sp"
+            android:textSize="10sp"
             android:textColor="#1677FF"
             android:textStyle="bold" />
 
@@ -144,7 +149,7 @@
             android:layout_weight="1"
             android:singleLine="true"
             android:ellipsize="end"
-            android:textSize="12sp"
+            android:textSize="11.5sp"
             android:textColor="#1D2129" />
 
         <TextView
@@ -154,8 +159,8 @@
             android:layout_marginStart="6dp"
             android:singleLine="true"
             android:ellipsize="end"
-            android:maxWidth="92dp"
-            android:textSize="11sp"
+            android:maxWidth="84dp"
+            android:textSize="10sp"
             android:textColor="#8A8F98" />
     </LinearLayout>
 
@@ -165,15 +170,15 @@
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:paddingTop="2dp"
-        android:paddingBottom="2dp">
+        android:paddingTop="1dp"
+        android:paddingBottom="1dp">
 
         <TextView
             android:id="@+id/widget_r3_time"
-            android:layout_width="42dp"
+            android:layout_width="38dp"
             android:layout_height="wrap_content"
             android:singleLine="true"
-            android:textSize="11sp"
+            android:textSize="10sp"
             android:textColor="#1677FF"
             android:textStyle="bold" />
 
@@ -184,7 +189,7 @@
             android:layout_weight="1"
             android:singleLine="true"
             android:ellipsize="end"
-            android:textSize="12sp"
+            android:textSize="11.5sp"
             android:textColor="#1D2129" />
 
         <TextView
@@ -194,8 +199,8 @@
             android:layout_marginStart="6dp"
             android:singleLine="true"
             android:ellipsize="end"
-            android:maxWidth="92dp"
-            android:textSize="11sp"
+            android:maxWidth="84dp"
+            android:textSize="10sp"
             android:textColor="#8A8F98" />
     </LinearLayout>
 
@@ -203,8 +208,8 @@
         android:id="@+id/widget_hint"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:paddingTop="6dp"
-        android:textSize="11sp"
+        android:paddingTop="4dp"
+        android:textSize="10sp"
         android:textColor="#8A8F98"
         android:text="打开应用同步一次" />
 
@@ -212,7 +217,10 @@
         android:id="@+id/widget_more"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:textSize="10sp"
+        android:layout_marginTop="2dp"
+        android:singleLine="true"
+        android:ellipsize="end"
+        android:textSize="9sp"
         android:textColor="#8A8F98"
         android:visibility="gone" />
 </LinearLayout>

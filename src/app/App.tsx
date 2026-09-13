@@ -18,6 +18,8 @@ import MascotEditor from '../ui/MascotEditor';
 import { isVideoFile, videoToSpriteSheet } from '../theme/videoSheet';
 import ChangelogSheet from '../ui/ChangelogSheet';
 import HistorySheet from '../ui/HistorySheet';
+import MascotCenterSheet from '../ui/MascotCenterSheet';
+import ShortcutSheet from '../ui/ShortcutSheet';
 import PasswordSheet from '../ui/PasswordSheet';
 import CloudSheet from '../ui/CloudSheet';
 import UpdateSheet from '../ui/UpdateSheet';
@@ -44,17 +46,13 @@ import { processImageFile } from '../theme/image';
 import { Icon } from '../ui/icons';
 import { useWideLayout } from '../ui/useWideLayout';
 import { APP_VERSION } from './version';
+import { TABS } from './tabs';
+import { comboOf, isTextField, matchCommand } from './commands';
+import { installBuiltinCommands } from './builtinCommands';
 import { DOWNLOAD_PAGE } from './meta';
 import { isNativePlatform } from '../platform/nativeBridge';
 import { countRender } from './renderCount';
 
-const TABS = [
-  { key: 'week', icon: 'calendar', label: '本周' },
-  { key: 'today', icon: 'sun', label: '今日' },
-  { key: 'tasks', icon: 'tasks', label: '任务' },
-  { key: 'studio', icon: 'palette', label: '外观' },
-  { key: 'settings', icon: 'settings', label: '设置' },
-] as const;
 
 export default function App() {
   countRender('App');
@@ -198,38 +196,36 @@ export default function App() {
     return function () { window.clearTimeout(id); };
   }, []);
 
-  /* 键盘快捷键：Ctrl/Cmd+Z 撤销，Ctrl+Shift+Z 或 Ctrl+Y 重做。
-     焦点在输入框里时让给浏览器自带的文本撤销，别抢。
-
-     电脑上再补一组导航键：←/→ 翻周、1–5 切页、/ 搜索。
-     手机上没有物理键盘，也就在电脑布局（wide）下才挂这几个键 ——
-     这样 Android 上的键盘行为与之前完全一致。 */
+  /*
+   * 键盘快捷键：全部走**命令表**（app/commands.ts）。
+   *
+   * 这一段原来是一串硬编码的 if，只有写代码的人知道有哪些键 ——
+   * 现在键位声明在命令上，界面上的「快捷键」一页直接读同一张表，
+   * 所以"能用什么键"与"说明里写了什么"不可能对不上。
+   *
+   * 两条规矩：
+   *   1. 焦点在输入控件里时不抢键（用户可能在打字、或想用浏览器自带的文本撤销）；
+   *      例外是 Esc 与带 Ctrl/Cmd 的组合键 —— 那些在输入框里也应该是应用级的。
+   *   2. 弹层开着时，导航类命令自己会 enabled=false（见 builtinCommands 的 noSheet），
+   *      所以不会出现"在弹层里按 ← 结果课表翻周了"。
+   */
   React.useEffect(function () {
-    function inField(el: EventTarget | null): boolean {
-      const t = el as HTMLElement | null;
-      if (!t) return false;
-      return t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable;
-    }
+    installBuiltinCommands();
     function onKey(e: KeyboardEvent): void {
-      if (inField(e.target)) return;
-      if (e.ctrlKey || e.metaKey) {
-        const k = e.key.toLowerCase();
-        if (k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
-        else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); redo(); }
-        return;
+      const combo = comboOf(e);
+      if (!combo) return;
+      if (isTextField(e.target)) {
+        /* 输入框里只放行 Esc（关弹层）与带修饰键的组合，其余留给输入本身 */
+        if (combo !== 'escape' && combo.indexOf('mod+') !== 0) return;
       }
-      if (!wide || e.altKey) return;
-      if (e.key === 'ArrowLeft') { e.preventDefault(); setWeek(s.week - 1); return; }
-      if (e.key === 'ArrowRight') { e.preventDefault(); setWeek(s.week + 1); return; }
-      if (e.key === '/') { e.preventDefault(); openSearch(); return; }
-      if (e.key >= '1' && e.key <= '5') {
-        const t = TABS[Number(e.key) - 1];
-        if (t) { e.preventDefault(); setTab(t.key); }
-      }
+      const cmd = matchCommand(combo);
+      if (!cmd) return;
+      e.preventDefault();
+      cmd.run();
     }
     window.addEventListener('keydown', onKey);
     return function () { window.removeEventListener('keydown', onKey); };
-  }, [wide, s.week]);
+  }, []);
 
   /*
    * 从邮件链接回来时补一次邮箱。
@@ -623,6 +619,9 @@ export default function App() {
       {s.cloud.syncAsk ? <SyncSheet /> : null}
       {s.update.sheet ? <UpdateSheet /> : null}
       {s.historySheet ? <HistorySheet /> : null}
+      {/* 角色中心：换一个 / 做一个 / 分享与获取 —— 角色的所有入口都收在这一处 */}
+      {s.mascotCenter ? <MascotCenterSheet /> : null}
+      {s.shortcutSheet ? <ShortcutSheet /> : null}
       {s.manualSheet ? <ManualView /> : null}
       {s.changelogSheet ? <ChangelogSheet /> : null}
 
