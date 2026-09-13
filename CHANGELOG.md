@@ -76,7 +76,7 @@ IMPORTCHECK verdict=PASS 预设数=2 切换后变了=yes 切回自动识别=yes 
 
 - 单测 **696 通过 / 40 个文件**（新增：导入预设契约 7 个、表头匹配 5 个）；`tsc --noEmit` 0 错误
 - 仓库新增示例 `examples/plugin-jwc-import.tbplugin.json`（长表 + 矩阵两条预设，改表头就能用）
-- 版本：**1.9.14 / versionCode 75**
+- 版本：**1.9.14 / versionCode 75**；APK **9,723,999 字节**，SHA-256 `B2B9E5AC17990DA294A5F4DB1EB9859A0F0792EDB78E76C9256FFE27EBA69996`（Supabase 与 GitHub 两份逐字节一致）；CI 全绿
 
 ---
 
