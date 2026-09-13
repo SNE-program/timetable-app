@@ -8,7 +8,7 @@
 
 | | Android 版（app.timetable.mobile） | 网页版 |
 | --- | --- | --- |
-| 怎么拿到 | 下载页 **<https://sne-program.github.io/timetable-app/download/>**（或 Releases） | 打开网址，不用安装 |
+| 怎么拿到 | 下载页 **<https://timble.bond/download/>**（或 Releases） | 打开网址，不用安装 |
 | 电脑上 | 应用内布局（平板横屏也是手机版式） | 自动切换成桌面布局：左侧导航 + 宽课表 + 两列设置 + 居中弹层，另有键盘快捷键 |
 | 提醒 | **系统闹钟**：息屏、关掉应用、重启手机之后照样响 | 页面内的通知：**页面保持打开时**准时响 |
 | 桌面小组件 | 2×2 / 4×2 | 没有（浏览器无法往桌面放东西） |
@@ -23,13 +23,13 @@ TypeScript + React + Vite，Android 由 Capacitor 打包。
 
 **网页版（最省事）**
 
-1. 打开 <https://sne-program.github.io/timetable-app/> —— 电脑和手机的浏览器都能用，电脑上会自动变成桌面布局；
+1. 打开 <https://timble.bond/> —— 电脑和手机的浏览器都能用，电脑上会自动变成桌面布局；
 2. 首次打开有一页说明，读完点「知道了，开始用」；
 3. 想收提醒就允许通知权限，并**把这一页留在前台** —— 关掉标签页就不会响，浏览器就是这么规定的。
 
 **Android 版（要后台提醒与桌面小组件就装它）**
 
-1. 打开下载页 **<https://sne-program.github.io/timetable-app/download/>**（或仓库的 Releases 页）拿到 `timetable-app.apk` —— 这个地址永远指向最新一版，GitHub 会去掉资源名里的中文，所以文件名是英文的，装到手机上叫什么随你；
+1. 打开下载页 **<https://timble.bond/download/>**（或仓库的 Releases 页）拿到 `timetable-app.apk` —— 这个地址永远指向最新一版，GitHub 会去掉资源名里的中文，所以文件名是英文的，装到手机上叫什么随你；
 2. 点开安装。系统可能提示「未知来源应用」—— 允许一次即可，安装完可以关掉这个开关；
 3. 首次打开有一页隐私说明，读完点「知道了，开始用」；
 4. 建议允许通知权限，否则课前提醒不会响（设置里随时能看到权限的真实状态）。
@@ -136,7 +136,7 @@ TypeScript + React + Vite，Android 由 Capacitor 打包。
 
 ## 自定义域名（timble.bond）
 
-网页版默认在 `https://sne-program.github.io/timetable-app/`。换成自己的域名只要三步，`public/CNAME` 已经写好了：
+网页版默认在 `https://timble.bond/`。换成自己的域名只要三步，`public/CNAME` 已经写好了：
 
 1. **DNS**（在域名商那边给 `timble.bond` 加四条 A 记录）：
 
@@ -157,7 +157,7 @@ TypeScript + React + Vite，Android 由 Capacitor 打包。
 
 ## 下载页
 
-地址：**<https://sne-program.github.io/timetable-app/download/>** —— 由 `public/download/index.html` 直接提供，
+地址：**<https://timble.bond/download/>** —— 由 `public/download/index.html` 直接提供，
 是一个不经过 React 的静态页（打开就能看到安装包按钮，不用等应用加载），内容有安装步骤、当前版本、SHA-256 与网页版入口。
 
 按钮指向 `releases/latest/download/timetable-app.apk` —— **发版时要同时上传这个固定名字的附件**，它才永远是最新版；

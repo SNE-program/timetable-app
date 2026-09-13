@@ -42,8 +42,9 @@ import {
 import { parseAuthLink } from '../cloud/link';
 import { buildBackupWithinLimit, describeBackup, formatTime, restoreAssets, validateBackup } from '../cloud/backup';
 import {
-  deleteMascot as deleteCloudMascot, fetchMascot, listMascots, myQuota, quotaLine, setMascotPublic,
-  uploadMascot, type CloudMascot, type MascotQuota,
+  deleteMascot as deleteCloudMascot, fetchMascot, listMascots, looksLikeShareCode, myQuota,
+  normalizeShareCode, quotaLine, resolveShare, setMascotPublic, setMascotShare, uploadMascot,
+  type CloudMascot, type MascotQuota,
 } from '../cloud/mascots';
 import { loadSession, saveSession, freshToken } from '../cloud/session';
 import { cloudConfigured, cloudHost } from '../cloud/config';
@@ -1516,7 +1517,13 @@ export interface CloudState {
    *   upload   正在上传
    *   delete   正在删除
    */
-  mascotsStage: '' | 'list' | 'download' | 'save' | 'upload' | 'delete';
+  mascotsStage: '' | 'list' | 'download' | 'save' | 'upload' | 'delete' | 'share';
+  /**
+   * 刚生成/查看的分享码（弹层显示用）。null = 没打开。
+   *
+   * 放这里而不是组件里：生成码要走一次网络，用户可能在别的面板上等结果。
+   */
+  shareSheet: { id: string; name: string; code: string } | null;
   mascotsError: string;
   quota: MascotQuota | null;
 }
@@ -1545,7 +1552,7 @@ function initialCloud(autoLogin: boolean): CloudState {
     session: restored, busy: '', error: '', notice: '', backup: null, syncAsk: false, passwordSheet: false, linkType: '',
     /* ?open=cloud：开发与无头检查用，直接把云弹层打开 */
     sheet: openParam() === 'cloud',
-    mascots: [], mascotsLoaded: false, mascotsStage: '', mascotsError: '', quota: null,
+    mascots: [], mascotsLoaded: false, mascotsStage: '', mascotsError: '', quota: null, shareSheet: null,
   };
   let link = null;
   try { link = parseAuthLink(window.location.hash, window.location.search); } catch (e) { link = null; }
@@ -2041,6 +2048,107 @@ function nextPaint(): Promise<void> {
   });
 }
 
+/**
+ * 打开一个角色的分享码（把码显示出来给用户，自己发给同学）。
+ *
+ * 与「公开」的区别：公开是挂到所有人能翻的列表里，分享码是**只有拿到码的人**能取。
+ * 所以这里不做任何"可见性"的承诺，只保证码本身可用。
+ */
+export async function cloudShareMascot(m: CloudMascot): Promise<void> {
+  const s = state.cloud.session;
+  if (!cloudConfigured() || !s) return;
+  setCloud({ mascotsStage: 'share', mascotsError: '' });
+  try {
+    const token = await cloudToken();
+    const code = await setMascotShare(token, m.id, true);
+    setCloud({
+      mascotsStage: '',
+      mascots: state.cloud.mascots.map(function (x) { return x.id === m.id ? Object.assign({}, x, { share_code: code }) : x; }),
+      shareSheet: code ? { id: m.id, name: m.name, code: code } : null,
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    setCloud({ mascotsStage: '', mascotsError: msg });
+    showToast(msg, 'error');
+  }
+}
+
+/** 关掉分享码：之前发出去的码立刻失效 */
+export async function cloudUnshareMascot(m: CloudMascot): Promise<void> {
+  const s = state.cloud.session;
+  if (!cloudConfigured() || !s) return;
+  setCloud({ mascotsStage: 'share', mascotsError: '' });
+  try {
+    const token = await cloudToken();
+    await setMascotShare(token, m.id, false);
+    setCloud({
+      mascotsStage: '',
+      shareSheet: null,
+      mascots: state.cloud.mascots.map(function (x) { return x.id === m.id ? Object.assign({}, x, { share_code: null }) : x; }),
+    });
+    showToast('已停止分享，之前的分享码作废', 'ok');
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    setCloud({ mascotsStage: '', mascotsError: msg });
+    showToast(msg, 'error');
+  }
+}
+
+export function closeShareSheet(): void { setCloud({ shareSheet: null }); }
+
+/** 已经算好的分享码（列表里那一行显示用） */
+export function shareCodeOf(m: CloudMascot): string {
+  return m.share_code || '';
+}
+
+/**
+ * 用分享码取一个角色：凭码换记录 → 下载 → 装到本机。
+ *
+ * 未登录也能用：拿到码的人不一定有账号。数据库那边只放行了"被分享的对象"，
+ * 所以没有码的人连对象路径都查不到。
+ */
+export async function cloudUseShareCode(raw: string): Promise<boolean> {
+  if (!cloudConfigured()) { showToast('这个版本没有配置云功能', 'warn'); return false; }
+  const code = normalizeShareCode(raw);
+  if (!looksLikeShareCode(code)) {
+    showToast('分享码是 6–12 位字母或数字，检查一下有没有漏字', 'warn');
+    return false;
+  }
+  setCloud({ mascotsStage: 'download', mascotsError: '' });
+  try {
+    let token: string | null = null;
+    if (state.cloud.session) { try { token = await cloudToken(); } catch (e) { token = null; } }
+    const row = await resolveShare(token, code);
+    if (!row) {
+      setCloud({ mascotsStage: '' });
+      showToast('没有找到这个分享码 —— 可能输错了，或者对方已经停止分享', 'error');
+      return false;
+    }
+    if (state.mascot) {
+      const ok = await confirmDanger(
+        '用分享的角色「' + row.name + '」替换现在的「' + state.mascot.name + '」？'
+        + '替换之后本机原来那个就没了 —— 除非你导出过角色包。',
+        '替换'
+      );
+      if (!ok) { setCloud({ mascotsStage: '' }); return false; }
+    }
+    const r = await fetchMascot(token, row.path);
+    if (!r.ok || !r.pack) throw new Error(r.errors.join('；') || '这个角色包读不出来');
+    setCloud({ mascotsStage: 'save' });
+    await nextPaint();
+    const applied = importMascotPackObject(r.pack, row.name, r.warnings);
+    if (!applied.ok) throw new Error(applied.error || '这个角色包用不了');
+    setCloud({ mascotsStage: '', sheet: false });
+    showToast('已用上「' + row.name + '」' + (applied.warnings.length ? '（' + applied.warnings.length + ' 条提示）' : ''), 'ok');
+    return true;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    setCloud({ mascotsStage: '', mascotsError: msg });
+    showToast(msg, 'error');
+    return false;
+  }
+}
+
 export async function cloudSetMascotPublic(m: CloudMascot, isPublic: boolean): Promise<void> {
   const s = state.cloud.session;
   if (!cloudConfigured() || !s) return;
@@ -2378,7 +2486,10 @@ export async function importIcsFromFile(file: File): Promise<void> {
   }
 }
 export function openEdit(id: string): void { setState({ editSheet: id, courseSheet: null }); }
-export function closeSheets(): void { setState({ courseSheet: null, editSheet: null, overrideSheet: null, schemeSheet: false, taskEditor: false, taskSheet: null, searchSheet: false, addSheet: false, shareSheet: null, exportSheet: false, manualSheet: false, manualSection: null, changelogSheet: false, importSheet: false,
+export function closeSheets(): void {
+  /* 云弹层里的分享码弹层也一起关掉（它是叠在云弹层上的） */
+  if (state.cloud.shareSheet) setCloud({ shareSheet: null });
+  setState({ courseSheet: null, editSheet: null, overrideSheet: null, schemeSheet: false, taskEditor: false, taskSheet: null, searchSheet: false, addSheet: false, shareSheet: null, exportSheet: false, manualSheet: false, manualSection: null, changelogSheet: false, importSheet: false,
     mascotEditor: null }); }
 export function openAdd(): void { setState({ addSheet: true }); }
 

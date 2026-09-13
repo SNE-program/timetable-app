@@ -47,6 +47,37 @@ export interface CloudMascot {
   size_bytes: number;
   created_at: string;
   updated_at: string;
+  /** 分享码：有值表示"拿到码的人可以用它"；为空表示未分享 */
+  share_code?: string | null;
+}
+
+/**
+ * 分享码：6–12 位大写字母与数字，**去掉了容易看错的 0 / O / 1 / I / L**。
+ *
+ * 为什么是分享码而不是"公开"：公开等于把角色挂到一个谁都能翻的广场上，
+ * 而实际需求几乎都是"发给某个同学"。码只有拿到的人能用，也没法枚举 ——
+ * 数据库那边只开了一个"凭精确的码换一条记录"的函数（见 schema-mascot-share.sql）。
+ */
+const SHARE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+
+export function newShareCode(rng?: () => number): string {
+  const r = rng || Math.random;
+  let out = '';
+  for (let i = 0; i < 8; i++) {
+    const idx = Math.min(SHARE_ALPHABET.length - 1, Math.floor(Math.max(0, Math.min(0.999999, r())) * SHARE_ALPHABET.length));
+    out += SHARE_ALPHABET[idx];
+  }
+  return out;
+}
+
+/** 用户输入清洗：大写、去空格与容易混淆的分隔符 */
+export function normalizeShareCode(raw: string): string {
+  return String(raw || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);
+}
+
+/** 码看起来对不对（客户端只做提示，真正的判定是"能不能查到"） */
+export function looksLikeShareCode(code: string): boolean {
+  return /^[A-Z0-9]{6,12}$/.test(normalizeShareCode(code));
 }
 
 export interface MascotQuota {
@@ -108,7 +139,7 @@ export function estimateMascotBytes(pack: MascotPack): { bytes: number; missingA
 }
 
 export async function listMascots(token: string | null): Promise<CloudMascot[]> {
-  const q = '/rest/v1/mascots?select=id,user_id,name,is_public,path,size_bytes,created_at,updated_at&order=created_at.desc&limit=60';
+  const q = '/rest/v1/mascots?select=id,user_id,name,is_public,path,size_bytes,created_at,updated_at,share_code&order=created_at.desc&limit=60';
   const json = await cloudRequest('GET', q, token ? { token: token } : {});
   return Array.isArray(json) ? (json as CloudMascot[]) : [];
 }
@@ -201,6 +232,69 @@ export async function fetchMascot(token: string | null, path: string): Promise<V
   });
   if (typeof json === 'string') return parseMascotFileText(json);
   return validateMascotPack(json);
+}
+
+/**
+ * 是不是"码撞了"。
+ *
+ * 判断要看两处：错误码（客户端会把 PostgREST 的 code 带进 CloudError.code）与原文 ——
+ * 只认一种写法的话，换个网络层实现就又变成"分享失败"了。
+ */
+function isDuplicateKey(e: unknown): boolean {
+  const code = e instanceof CloudError ? e.code : '';
+  const msg = e instanceof Error ? e.message : String(e);
+  return code === '23505' || msg.indexOf('23505') >= 0 || /duplicate key/i.test(msg);
+}
+
+/**
+ * 打开 / 关闭一个角色的分享码。
+ *
+ * 打开时生成一个新的随机码；**撞码**（数据库那边是唯一索引）会重试几次 ——
+ * 8 位 × 31 个字母数字，撞的概率极低，但"极低"不等于"不会"，而失败一次
+ * 用户看到的就是"分享失败"，不如自己重试。
+ */
+export async function setMascotShare(
+  token: string, id: string, on: boolean, rng?: () => number
+): Promise<string | null> {
+  if (!on) {
+    await cloudRequest('PATCH', '/rest/v1/mascots?id=eq.' + encodeURIComponent(id), {
+      token: token, prefer: 'return=minimal', body: { share_code: null },
+    });
+    return null;
+  }
+  let lastErr: unknown = null;
+  for (let i = 0; i < 4; i++) {
+    const code = newShareCode(rng);
+    try {
+      await cloudRequest('PATCH', '/rest/v1/mascots?id=eq.' + encodeURIComponent(id), {
+        token: token, prefer: 'return=minimal', body: { share_code: code },
+      });
+      return code;
+    } catch (e) {
+      lastErr = e;
+      /* 23505 = 唯一约束冲突：换一个码再来；其它错误直接抛 */
+      if (!isDuplicateKey(e)) throw e;
+    }
+  }
+  throw new CloudError('分享码生成失败，稍后再试一次', 0, 'code_conflict');
+}
+
+/**
+ * 凭分享码换一条记录（数据库里的 SECURITY DEFINER 函数）。
+ *
+ * 只有**精确匹配**才有结果：不知道码就查不出任何东西，也没法把"所有分享过的角色"列出来。
+ * 未登录也能用 —— 拿到码的人未必有账号。
+ */
+export async function resolveShare(token: string | null, code: string): Promise<CloudMascot | null> {
+  const clean = normalizeShareCode(code);
+  if (!looksLikeShareCode(clean)) return null;
+  const json = await cloudRequest('POST', '/rest/v1/rpc/resolve_mascot_share', {
+    token: token || undefined,
+    body: { code: clean },
+    timeoutMs: 20000,
+  });
+  const rows = Array.isArray(json) ? (json as CloudMascot[]) : [];
+  return rows.length ? rows[0] : null;
 }
 
 export async function setMascotPublic(token: string, id: string, isPublic: boolean): Promise<void> {

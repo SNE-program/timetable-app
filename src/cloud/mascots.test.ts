@@ -7,8 +7,8 @@ import { defaultTheme } from '../theme/tokens';
 import { buildDemoData } from '../core/demo';
 import { __setCloudConfigForTest } from './config';
 import {
-  MAX_MASCOT_BYTES, estimateMascotBytes, fetchMascot, formatMb, isMine, myQuota, prepareMascotUpload,
-  quotaLine, uploadMascot,
+  MAX_MASCOT_BYTES, estimateMascotBytes, fetchMascot, formatMb, isMine, looksLikeShareCode, myQuota,
+  newShareCode, normalizeShareCode, prepareMascotUpload, quotaLine, resolveShare, setMascotShare, uploadMascot,
 } from './mascots';
 
 /**
@@ -251,5 +251,82 @@ describe('取回角色', function () {
     expect(r.ok).toBe(true);
     expect(r.pack!.name).toBe('演示角色');
     expect(r.pack!.states.idle).toBeTruthy();
+  });
+});
+
+describe('分享码', function () {
+  const row = { id: 'm1', user_id: 'u1', name: '演示角色', is_public: false, path: 'u1/m1.json', size_bytes: 10, created_at: '', updated_at: '' };
+
+  it('生成的码是 8 位，且不含容易看错的 0/O/1/I/L', function () {
+    for (let i = 0; i < 200; i++) {
+      const c = newShareCode();
+      expect(c.length).toBe(8);
+      expect(c).toMatch(/^[A-Z0-9]{8}$/);
+      expect(c).not.toMatch(/[0O1IL]/);
+    }
+  });
+
+  it('注入随机源时可复现', function () {
+    const seq = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7];
+    let i = 0;
+    const c = newShareCode(function () { return seq[i++ % seq.length]; });
+    expect(c.length).toBe(8);
+    expect(c[0]).toBe('A');   /* 第一个字符来自字母表第一位 */
+  });
+
+  it('用户输入的码会被清洗：小写、空格、连字符都能收', function () {
+    expect(normalizeShareCode(' 7kq2-m9xf ')).toBe('7KQ2M9XF');
+    expect(looksLikeShareCode('7kq2-m9xf')).toBe(true);
+    expect(looksLikeShareCode('abc')).toBe(false);
+    expect(looksLikeShareCode('')).toBe(false);
+  });
+
+  it('打开分享：PATCH 自己的那一行，返回新码', async function () {
+    const calls = stub(function () { return { status: 204 }; });
+    const code = await setMascotShare('token-1', 'm1', true);
+    expect(code).toBeTruthy();
+    expect(calls.length).toBe(1);
+    expect(calls[0].method).toBe('PATCH');
+    expect(calls[0].url).toBe('https://demo.supabase.co/rest/v1/mascots?id=eq.m1');
+    expect(JSON.parse(calls[0].body).share_code).toBe(code);
+  });
+
+  it('关闭分享：把 share_code 置空', async function () {
+    const calls = stub(function () { return { status: 204 }; });
+    const code = await setMascotShare('token-1', 'm1', false);
+    expect(code).toBeNull();
+    expect(JSON.parse(calls[0].body).share_code).toBeNull();
+  });
+
+  it('撞码时换一个再试，而不是直接失败', async function () {
+    let n = 0;
+    const calls = stub(function () {
+      n++;
+      if (n <= 2) return { status: 409, json: { code: '23505', message: 'duplicate key value violates unique constraint' } };
+      return { status: 204 };
+    });
+    const code = await setMascotShare('token-1', 'm1', true);
+    expect(code).toBeTruthy();
+    expect(calls.length).toBe(3);
+  });
+
+  it('凭码解析走数据库函数，未登录也能调', async function () {
+    const calls = stub(function () { return { json: [row] }; });
+    const got = await resolveShare(null, '7kq2-m9xf');
+    expect(calls[0].url).toBe('https://demo.supabase.co/rest/v1/rpc/resolve_mascot_share');
+    expect(calls[0].method).toBe('POST');
+    expect(JSON.parse(calls[0].body).code).toBe('7KQ2M9XF');
+    expect(got && got.name).toBe('演示角色');
+  });
+
+  it('格式不对的码不会发请求', async function () {
+    const calls = stub(function () { return { json: [] }; });
+    expect(await resolveShare(null, 'ab')).toBeNull();
+    expect(calls.length).toBe(0);
+  });
+
+  it('码不存在时返回 null（不抛错，让界面说人话）', async function () {
+    stub(function () { return { json: [] }; });
+    expect(await resolveShare(null, 'ZZZZZZZZ')).toBeNull();
   });
 });

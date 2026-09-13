@@ -43,7 +43,7 @@ export const PUBLIC_SITE_URL = 'https://timble.bond/';
  * 它会被 302 到 timble.bond，fetch 会自动跟随，所以两个都留着更稳。
  */
 export const UPDATE_MANIFEST_URLS: string[] = [
-  'https://sne-program.github.io/timetable-app/latest.json',
+  'https://timble.bond/latest.json',
   PUBLIC_SITE_URL + 'latest.json',
 ];
 

@@ -3,6 +3,7 @@ import { Sheet } from './common';
 import { Icon } from './icons';
 import CloudPanel from './CloudPanel';
 import MascotCloudSection from './MascotCloudSection';
+import MascotShareSheet from './MascotShareSheet';
 import { closeCloudSheet, useApp } from '../app/store';
 
 /**
@@ -31,6 +32,9 @@ export default function CloudSheet() {
 
       <div className="section-title">云端角色</div>
       <MascotCloudSection />
+
+      {/* 分享码弹层：叠在云弹层之上 */}
+      <MascotShareSheet />
 
 
     </Sheet>

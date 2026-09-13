@@ -25,7 +25,7 @@
 | Edge Function | `send-mail` / `delete-account` 已部署（ACTIVE、verify_jwt=true）|
 | Functions Secrets | `RESEND_API_KEY`、`MAIL_FROM` 已设置 |
 | Auth SMTP | `smtp.resend.com:465`（用户 `resend`），发件人 `课表助手 <noreply@wzmssf.club>` |
-| Site URL / 回调 | `https://sne-program.github.io/timetable-app/` + 本地 5273 |
+| Site URL / 回调 | `https://timble.bond/` + 本地 5273 |
 | 发件域名 | **`timble.bond`**（已验证并启用）|
 | 邮件限额 | `rate_limit_email_sent` = **30/小时**（默认只有 2/小时，一小时内第三个同学就注册不了）|
 | 邮件模板 | 已改成中文（确认邮箱 / 重置密码），署名「课表助手」|
@@ -66,7 +66,7 @@ Supabase 控制台 → **SQL Editor** → 把 `supabase/schema.sql` 整段粘进
 
 | 项 | 填什么 |
 | --- | --- |
-| Site URL | `https://sne-program.github.io/timetable-app/` |
+| Site URL | `https://timble.bond/` |
 | Redirect URLs | 同上（再加本地调试地址 `http://localhost:5273/`）|
 
 这一项必须填，否则"忘记密码"邮件里的链接跳不回应用。

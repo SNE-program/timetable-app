@@ -15,6 +15,8 @@ import { join } from 'node:path';
 
 const ROOT = process.cwd();
 const SCHEMA = readFileSync(join(ROOT, 'supabase', 'schema.sql'), 'utf8');
+const MASCOTS = readFileSync(join(ROOT, 'supabase', 'schema-mascots.sql'), 'utf8');
+const SHARE = readFileSync(join(ROOT, 'supabase', 'schema-mascot-share.sql'), 'utf8');
 const SEND_MAIL = readFileSync(join(ROOT, 'supabase', 'functions', 'send-mail', 'index.ts'), 'utf8');
 const DELETE_ACCOUNT = readFileSync(join(ROOT, 'supabase', 'functions', 'delete-account', 'index.ts'), 'utf8');
 
@@ -108,5 +110,56 @@ describe('Edge Function 的安全性质', function () {
     for (const src of [SEND_MAIL, DELETE_ACCOUNT]) {
       expect(src).not.toMatch(/eyJ[A-Za-z0-9_-]{20,}\./);
     }
+  });
+});
+
+describe('云端角色的分享码', function () {
+  it('两个函数都是 SECURITY DEFINER —— 否则 RLS 会让它们永远返回空', function () {
+    /*
+     * 这一条不是洁癖：Storage 的策略表达式里不能直接 join mascots（会以调用者的
+     * 身份再算一遍 RLS），所以必须走 DEFINER 函数。写漏了的表现是
+     * 「分享码能查到、但下载 403」—— 两边各查一半，很难想到是这里。
+     */
+    const fns = SHARE.split('create or replace function').slice(1);
+    expect(fns.length).toBe(2);
+    for (const fn of fns) expect(fn.slice(0, 400)).toContain('security definer');
+  });
+
+  it('函数执行权限给了 anon：拿到码的人不需要账号', function () {
+    for (const fn of ['resolve_mascot_share(text)', 'mascot_is_shared(text)']) {
+      expect(SHARE).toContain('grant execute on function public.' + fn + ' to anon, authenticated');
+      expect(SHARE).toContain('revoke all on function public.' + fn + ' from public');
+    }
+  });
+
+  it('★ 没有把「分享中的行」开放给任何人读 —— 那等于让码失去意义', function () {
+    /* 一旦有人能 select 出 share_code is not null 的行，就能把所有人的角色列出来 */
+    expect(SHARE).not.toMatch(/create policy[\s\S]{0,200}?for select[\s\S]{0,200}?share_code is not null/i);
+    /* 分享码本身只能是「知道才能查」：函数里必须是精确相等 */
+    expect(SHARE).toContain('m.share_code = upper(btrim(coalesce(code');
+    expect(SHARE).not.toMatch(/share_code like/i);
+  });
+
+  it('分享码有格式约束与唯一索引', function () {
+    expect(SHARE).toContain('mascots_share_code_format');
+    expect(SHARE).toContain('create unique index if not exists mascots_share_code_key');
+    expect(SHARE).toContain("[A-Z0-9]{6,12}");
+  });
+
+  it('Storage 那条策略只放行「被分享的对象」', function () {
+    expect(SHARE).toContain('public.mascot_is_shared(name)');
+    expect(SHARE).toContain("bucket_id = 'mascots'");
+  });
+});
+
+describe('角色表与配额', function () {
+  it('mascots 开了 RLS，且写操作都限定自己那一行', function () {
+    expect(MASCOTS).toContain('alter table public.mascots enable row level security');
+    expect(MASCOTS).toContain('with check (auth.uid() = user_id)');
+  });
+
+  it('配额在数据库触发器里，不在客户端', function () {
+    expect(MASCOTS).toContain('mascot_quota_check');
+    expect(MASCOTS).toContain('云端角色最多 2 个');
   });
 });
