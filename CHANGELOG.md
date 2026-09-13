@@ -77,7 +77,12 @@
 
 **⑦ 交付**
 
-构建完成后补：APK 体积 / SHA-256。
+- 版本：**1.9.6 / versionCode 67**；单测 605 通过 / 35 个文件；`tsc --noEmit` 0 错误；Android `compileDebugJavaWithJavac` 通过
+- APK：**9,709,263 字节**，SHA-256 `CAAD1303DFE0E5EF096D76127C8A662FE954C9C5DF8C7EF35F3140A83A48C603`
+  （Supabase 主地址与 GitHub 备选逐个下载核对，两份逐字节一致）
+- CI 全绿（含"核对安装包里有没有云端配置"与"校验签名"两步）；网页版与下载页已同步
+- 发版前自检：`?dragcheck=1` 两个场景（整块移动到周三第 6-7 节 / 拖上边缘只留第 4 节，两次都能撤销）、
+  `?widgetcheck=1` 四个尺寸各显示几行、`?wp=1` 四尺寸预览无溢出、`?histcheck=3` 历史面板
 
 ---
 ## v1.9.5
