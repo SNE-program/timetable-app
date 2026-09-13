@@ -44,6 +44,8 @@ const others = canPublish ? c.mascots.filter(m => m.is_public && !isMine(m, me))
 **④ 验证与交付**
 
 - 单测 **631 通过 / 36 个文件**；`tsc --noEmit` 0 错误；版本 **1.9.9 / versionCode 70**
+- APK：**9,713,987 字节**，SHA-256 `10BC3C643F7E0D0067839201D5329F0A2EDDBC9962AC2DD100C449489A58B97D`
+  （Supabase 主地址与 GitHub 备选逐个下载核对，两份逐字节一致）；CI 全绿
 
 ---
 ## v1.9.8
