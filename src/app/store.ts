@@ -1945,7 +1945,9 @@ function initialCloud(autoLogin: boolean): CloudState {
     session: restored, busy: '', error: '', notice: '', backup: null, syncAsk: false, passwordSheet: false, linkType: '',
     /* ?open=cloud：开发与无头检查用，直接把云弹层打开 */
     sheet: openParam() === 'cloud',
-    mascots: [], mascotsLoaded: false, mascotsStage: '', mascotsError: '', quota: null, shareSheet: null,
+    mascots: [], mascotsLoaded: false, mascotsStage: '', mascotsError: '', quota: null,
+    /* ?open=sharecode 直接摊开分享码弹层（开发用：它的布局与"码有没有显示出来"要能量） */
+    shareSheet: openParam() === 'sharecode' ? { id: 'dev-mascot', name: '示例角色', code: '7KQ2M9XF' } : null,
   };
   let link = null;
   try { link = parseAuthLink(window.location.hash, window.location.search); } catch (e) { link = null; }
@@ -2560,24 +2562,33 @@ export async function cloudShareMascot(m: CloudMascot): Promise<void> {
   }
 }
 
-/** 关掉分享码：之前发出去的码立刻失效 */
-export async function cloudUnshareMascot(m: CloudMascot): Promise<void> {
+/**
+ * 关掉分享码：之前发出去的码立刻失效。
+ *
+ * 只带 id 也能调（`{ id, name }`）：分享码弹层里那一下不该依赖
+ * "这个角色恰好还在当前列表里" —— 列表没刷新时按钮就成了摆设。
+ */
+export async function cloudUnshareMascot(m: { id: string; name?: string }): Promise<boolean> {
   const s = state.cloud.session;
-  if (!cloudConfigured() || !s) return;
+  if (!cloudConfigured() || !s) {
+    showToast('先登录才能停止分享', 'info');
+    return false;
+  }
   setCloud({ mascotsStage: 'share', mascotsError: '' });
   try {
     const token = await cloudToken();
     await setMascotShare(token, m.id, false);
     setCloud({
       mascotsStage: '',
-      shareSheet: null,
       mascots: state.cloud.mascots.map(function (x) { return x.id === m.id ? Object.assign({}, x, { share_code: null }) : x; }),
     });
-    showToast('已停止分享，之前的分享码作废', 'ok');
+    showToast('已停止分享，之前发出去的码立刻失效', 'ok');
+    return true;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     setCloud({ mascotsStage: '', mascotsError: msg });
     showToast(msg, 'error');
+    return false;
   }
 }
 

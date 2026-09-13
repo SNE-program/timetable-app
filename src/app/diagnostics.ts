@@ -867,6 +867,112 @@ function runDragCheck(): void {
   }, 1600);
 }
 
+/**
+ * 文字被截断的普查（?clipcheck=1）。
+ *
+ * 与布局自检里那条 CLIPPED 不同：那条只看"设了 ellipsis / overflow:hidden"的元素，
+ * 于是**行数限制（-webkit-line-clamp）被裁掉的内容根本不在统计里** ——
+ * 而课表上那些课名正是这么被裁的。这个检查把两种情况都算上：
+ *
+ *   1. 单行溢出：scrollWidth > clientWidth（内容比盒子宽）
+ *   2. 多行裁剪：设了 -webkit-line-clamp，且 scrollHeight > clientHeight（第 N 行之后被吃掉）
+ *
+ * 输出按"控件形态"聚合（谁、几处、最严重的一处的实际宽度与字号），
+ * 并且带上两层祖先，便于直接定位到是哪一块面板。
+ */
+function runClipCheck(): void {
+  let send = function (_text: string): void { /* 默认不回传 */ };
+  try { send = makeReporter(new URLSearchParams(window.location.search).get('report') || ''); } catch (e) { /* 忽略 */ }
+
+  setTimeout(function () {
+    const all = Array.prototype.slice.call(document.querySelectorAll('body *')) as HTMLElement[];
+    type Hit = { key: string; why: string; text: string; w: number; need: number; font: string; overflow: string; where: string };
+    const hits: Hit[] = [];
+
+    function pathOf(el: HTMLElement): string {
+      const cls = (el.className && typeof el.className === 'string')
+        ? '.' + el.className.trim().split(/\s+/).slice(0, 2).join('.') : '';
+      return el.tagName.toLowerCase() + cls;
+    }
+    function parentChain(el: HTMLElement): string {
+      const out: string[] = [];
+      let p = el.parentElement;
+      for (let i = 0; i < 3 && p; i++) { out.push(pathOf(p)); p = p.parentElement; }
+      return out.join(' < ');
+    }
+
+    for (const el of all) {
+      /* 只统计直接带文字的叶子元素：容器的溢出由它的孩子体现，重复统计没意义 */
+      const txt = (el.textContent || '').trim();
+      if (!txt) continue;
+      const st = getComputedStyle(el);
+      if (st.display === 'none' || st.visibility === 'hidden' || st.opacity === '0') continue;
+      /* 横向滚动容器（课表本身就是可以横滑的）不算截断 */
+      if (st.overflowX === 'auto' || st.overflowX === 'scroll') continue;
+      const r = el.getBoundingClientRect();
+      if (r.width < 2 || r.height < 2) continue;
+
+      const clamp = st.getPropertyValue('-webkit-line-clamp');
+      const clamped = clamp && clamp !== 'none';
+      /*
+       * 扣掉"可点区域"伪元素的贡献：它是绝对定位、往外扩的，不占布局，
+       * 却会被算进 scrollWidth —— 不扣的话每一个按钮都会被报成"溢出"（假阳性）。
+       */
+      let grow = 0;
+      for (const p of ['::after', '::before']) {
+        const a = getComputedStyle(el, p);
+        if (!a || a.content === 'none' || a.position !== 'absolute') continue;
+        const parts = a.inset.split(' ');
+        const h = parseFloat(parts.length > 1 ? parts[1] : parts[0]);
+        if (!isNaN(h) && h < 0) grow += -h * 2;
+      }
+      const needPx = Math.max(0, el.scrollWidth - grow);
+      const wide = needPx > el.clientWidth + 1 && el.clientWidth > 0;
+      const tall = clamped && el.scrollHeight > el.clientHeight + 1;
+      if (!wide && !tall) continue;
+      /*
+       * 分两种，别混为一谈：
+       *   截断 —— 盒子真的把文字吃掉了（overflow hidden / ellipsis / 行数限制），用户看不到完整内容；
+       *   溢出 —— 内容比盒子宽，但没被吃掉（overflow visible），视觉上是"字跑出边框外面"。
+       * 前者是这一轮要修的"文字被截断"，后者是排版没对齐，也要修但不该算进同一个数字。
+       */
+      const eats = st.overflowX === 'hidden' || st.overflowX === 'clip'
+        || st.textOverflow === 'ellipsis' || (st.overflow === 'hidden') || clamped;
+      hits.push({
+        key: pathOf(el),
+        why: (tall ? '多行裁剪' : (eats ? '截断' : '溢出可见')),
+        text: txt.slice(0, 18),
+        w: Math.round(el.clientWidth),
+        need: Math.max(needPx, el.clientWidth),
+        font: parseFloat(st.fontSize).toFixed(1) + 'px',
+        overflow: st.overflowX + (st.textOverflow === 'ellipsis' ? '/ellipsis' : ''),
+        where: parentChain(el),
+      });
+    }
+
+    /* 聚合：同一形态归一条，附最严重的那处 */
+    const byKey = new Map<string, { n: number; worst: Hit }>();
+    for (const h of hits) {
+      const k = h.key + '|' + h.why;
+      const cur = byKey.get(k);
+      if (!cur) byKey.set(k, { n: 1, worst: h });
+      else { cur.n++; if (h.need - h.w > cur.worst.need - cur.worst.w) cur.worst = h; }
+    }
+    const sorted = Array.from(byKey.entries()).sort(function (a, b) { return b[1].n - a[1].n; });
+    const eaten = hits.filter(function (h) { return h.why !== '溢出可见'; });
+    send('CLIPCHECK 视口=' + window.innerWidth + 'x' + window.innerHeight
+      + ' 真正被截断=' + eaten.length + ' 处，溢出但可见=' + (hits.length - eaten.length) + ' 处，共 ' + sorted.length + ' 类');
+    for (const [k, v] of sorted.slice(0, 14)) {
+      const w = v.worst;
+      send('CLIPCHECK ' + k.split('|')[0] + ' ×' + v.n + ' [' + w.why + '] overflow=' + w.overflow
+        + ' 实宽=' + w.w + ' 需=' + w.need + ' 字号=' + w.font + ' 文本="' + w.text + '" 位置=' + w.where);
+    }
+    /* 顺带把最宽的几处列出来，便于判断"是不是整体太窄" */
+    const widest = eaten.slice().sort(function (a, b) { return (b.need - b.w) - (a.need - a.w); }).slice(0, 6);
+    for (const w of widest) send('CLIPCHECK 最严重 ' + w.key + ' 差=' + (w.need - w.w) + 'px 文本="' + w.text + '"');
+  }, 1800);
+}
+
 export function runDiagnostics(): void {
   const params = new URLSearchParams(window.location.search);
 
@@ -880,6 +986,7 @@ export function runDiagnostics(): void {
   if (params.get('ovcheck') === '1') runOverrideCheck();
   if (params.get('wp') === '1') runWidgetPreviewCheck();
   if (params.get('dragcheck') === '1') runDragCheck();
+  if (params.get('clipcheck') === '1') runClipCheck();
   if (params.get('behavecheck')) {
     const sec = Number(params.get('behavecheck'));
     runBehaviorCheck(isFinite(sec) && sec >= 5 ? Math.min(180, sec) : 30);
@@ -949,7 +1056,22 @@ export function runDiagnostics(): void {
       const r = el.getBoundingClientRect();
       if (r.width === 0 && r.height === 0) continue;
       if (isFixed(el)) continue;
-      if (el.closest('.week-strip') || el.closest('.preset-scroll') || el.closest('.tl') || el.closest('.wp-grid')) continue;
+      /*
+       * 横向滚动容器里的内容"超出视口"是**设计如此**：用户滑一下就能看到。
+       * 原来这里靠一串选择器逐个豁免（.week-strip / .preset-scroll …），
+       * 于是每加一个横向滚动区就得记得回来补一笔 —— 课表主体改成可横滑之后就漏了，
+       * 一次报出 16 条假溢出。现在改成按**样式**判断：祖先里有 overflow-x: auto/scroll
+       * 的元素一律不算溢出；真正的页面级横滚由 hscroll 那条指标管。
+       */
+      let scroller: HTMLElement | null = el.parentElement;
+      let insideScroller = false;
+      while (scroller && scroller !== doc.body) {
+        const ox = win.getComputedStyle(scroller).overflowX;
+        if (ox === 'auto' || ox === 'scroll') { insideScroller = true; break; }
+        scroller = scroller.parentElement;
+      }
+      if (insideScroller) continue;
+      if (el.closest('.tl') || el.closest('.wp-grid')) continue;
       if (r.width > vw + 1 || r.right > vw + 1 || r.left < -1) {
         wide.push(describe(el) + ' w=' + Math.round(r.width) + ' R=' + Math.round(r.right));
       }

@@ -428,7 +428,19 @@ export default function WeekView() {
     }
   }
 
+  const scrollRef = React.useRef<HTMLDivElement>(null);
   const touch = React.useRef<{ x: number; y: number } | null>(null);
+
+  /**
+   * 课表现在能不能横向滚。
+   *
+   * 能滚的时候，横滑是"看后面的天"；不能滚（比如只显示 5 天、屏幕够宽）时，
+   * 横滑仍然是原来的"翻周"。两种手势不会打架 —— 用户不需要记两套规则。
+   */
+  function canScrollX(): boolean {
+    const el = scrollRef.current;
+    return !!el && el.scrollWidth > el.clientWidth + 4;
+  }
   function onDown(ev: React.PointerEvent) {
     /* 从课程卡、按钮、输入框上开始的拖动多半不是想翻周，忽略掉 */
     const t = ev.target as HTMLElement;
@@ -442,6 +454,7 @@ export default function WeekView() {
     const t0 = touch.current;
     touch.current = null;
     if (!t0) return;
+    if (canScrollX()) return;   /* 能横滚时这一下是"看后面的天"，不翻周 */
     const dx = ev.clientX - t0.x;
     const dy = ev.clientY - t0.y;
     if (Math.abs(dx) > 72 && Math.abs(dy) < 40) {
@@ -500,6 +513,16 @@ export default function WeekView() {
         </div>
       ) : null}
 
+      {/*
+       * 课表主体放进一个**可以横向滚动**的容器。
+       *
+       * 以前它永远压成屏幕那么宽：一周排 7 天上，360px 的手机里每列只有 30 多像素 ——
+       * 课程名被迫折成三行、教室名被省略号吃掉（"实验楼 C101" 只剩"实…"）。
+       * 现在给每天一个**最小可读宽度**（--col-min），放不下就横向滚：
+       * 宁可多滑一下，也不要让每一张卡上的字都被截断。
+       */}
+      <div className="week-scroll-x" ref={scrollRef}>
+      <div className="week-inner" style={{ ['--cols' as string]: String(days) } as React.CSSProperties}>
       <div className="week-head">
         <button className="axis-spacer" onClick={openScheme} title="点这里修改每节课的上课时间"><Icon name="settings" size={13} /></button>
         <div className="days-head">
@@ -586,6 +609,8 @@ export default function WeekView() {
             />
           ) : null}
         </div>
+      </div>
+      </div>
       </div>
       {events.length > 0 ? (
         <div className="stat-row">

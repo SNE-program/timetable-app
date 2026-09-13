@@ -11,7 +11,7 @@ import { STATE_LABEL, type MascotPack } from '../mascot/types';
 import { exportMascotPackFile, importMascotMedia, importMascotPackFile, pickFile } from './mascotImport';
 import {
   closeMascotCenter, cloudDeleteMascot, cloudLoadMascots, cloudQuotaLine, cloudShareCurrent,
-  cloudShareMascot, cloudUnshareMascot, cloudUploadMascot, cloudUseMascot, cloudUseShareCode,
+  cloudSetMascotPublic, cloudShareMascot, cloudUnshareMascot, cloudUploadMascot, cloudUseMascot, cloudUseShareCode,
   copyShareText, forgetRecentShareCode, importMascotPack, mascotLibrary, openCloudSheet, openMascotEditor, openManual,
   pushRecentShareCode, recentShareCodes, removeMascotFromLibrary, renameMascotFromLibrary,
   saveCurrentMascotToLibrary, setMascotCenterTab, showToast, useMascotFromLibrary, useApp,
@@ -53,6 +53,8 @@ export default function MascotCenterSheet() {
   const pack = s.mascot;
   const lib = mascotLibrary();
   const mine = c.mascots.filter(function (m) { return isMine(m, me); });
+  /* 公开这个开关只对额度不设限的账号有意义（别人的角色只通过分享码流转） */
+  const canPublish = !!(c.quota && c.quota.unlimited);
   const stage = c.mascotsStage;
   const stageText = stage === 'list' ? '正在读取云端…' : stage === 'download' ? '正在下载…'
     : stage === 'save' ? '正在保存…' : stage === 'upload' ? '正在上传…'
@@ -198,6 +200,17 @@ export default function MascotCenterSheet() {
                 <div className="lr-right" style={{ display: 'flex', gap: 6 }}>
                   <button className="btn sm primary" disabled={busy} onClick={function () { setBusy(true); void cloudUseMascot(m).then(function () { setBusy(false); }); }}>用这个</button>
                   <button className="btn sm ghost" disabled={busy} onClick={function () { void cloudShareMascot(m); }}>{m.share_code ? '分享码' : '分享'}</button>
+                  {/*
+                    公开：只有额度不设限的账号会看到（也就是作者自己）。
+                    服务端不放宽任何权限，客户端按 profiles.unlimited_mascots 决定显不显示。
+                    v1.9.6 把它落在「角色中心」之外了 —— 从新入口进来的人找不到这个开关，
+                    于是"公开功能不见了"。这里补回来，和云弹层里那一份是同一个接口。
+                  */}
+                  {canPublish ? (
+                    <button className="btn sm ghost" disabled={busy} onClick={function () { void cloudSetMascotPublic(m, !m.is_public); }}>
+                      {m.is_public ? '取消公开' : '公开'}
+                    </button>
+                  ) : null}
                   <button className="btn sm ghost" disabled={busy} onClick={function () { void cloudDeleteMascot(m); }}>删除</button>
                 </div>
               </div>

@@ -260,16 +260,31 @@ input[type="range"].rng::-moz-range-thumb { width: 12px; height: 12px; border-ra
 /* 主题预览卡 */
 .preset-scroll { display: flex; gap: 8px; overflow-x: auto; padding: 2px 14px 13px; }
 .preset-card {
+  /*
+   * 名字与说明**允许两行**。
+   *
+   * 卡片宽度固定 96px（一排横滑的缩略卡），而"工作台大厂蓝 · 色条卡"这种
+   * 名字单行要 99px —— 用省略号的话整整一排八张卡的名字全是残缺的。
+   * 两行足够放下绝大多数名字，卡高由内容决定，不影响缩略图。
+   */
   flex: 0 0 auto; width: 96px; border-radius: var(--r-card); overflow: hidden;
   border: 1px solid var(--c-border); background: var(--c-surface);
   transition: border-color var(--dur) var(--ease);
 }
 .preset-card.active { border-color: var(--c-accent); box-shadow: 0 0 0 2px var(--c-today); }
-.preset-thumb { height: 64px; position: relative; }
+.preset-thumb { height: 64px; position: relative; overflow: hidden; }
 .preset-thumb .bar { position: absolute; border-radius: 1px; }
 .preset-meta { padding: 6px 8px 7px; border-top: 1px solid var(--c-border); }
-.preset-name { font-size: var(--fs-xs); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.preset-hint { font-size: var(--fs-xs); color: var(--c-text-muted); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.preset-name {
+  font-size: var(--fs-xs); font-weight: 700;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; line-height: 1.35; word-break: break-word;
+}
+.preset-hint {
+  font-size: var(--fs-xs); color: var(--c-text-muted); margin-top: 2px;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; line-height: 1.35; word-break: break-word;
+}
 
 /* 壁纸选择 */
 .wp-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; padding: 4px 14px 13px; }
@@ -1010,13 +1025,20 @@ input[type="range"].rng::-moz-range-thumb { width: 12px; height: 12px; border-ra
 }
 .mascot-slot.on { border-color: var(--c-accent); background: var(--c-today); }
 .mascot-slot:active { background: var(--c-surface-2); }
+/**
+ * 状态名与说明：**折行，不用省略号**。
+ * 320px 上每格只有 44px，"长时间没动"（5 个字 ≈ 55px）单行必然被截成"长时间…"，
+ * 而这一格要说的恰恰是"这是什么状态"—— 折成两行才看得完整。
+ */
 .mascot-slot-name {
-  font-size: var(--fs-xs); font-weight: 600; margin-top: 5px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: var(--fs-xs); font-weight: 600; margin-top: 5px; line-height: 1.3;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; word-break: break-word;
 }
 .mascot-slot-sub {
-  font-size: 9px; color: var(--c-text-muted); margin-top: 1px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 9px; color: var(--c-text-muted); margin-top: 1px; line-height: 1.3;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; word-break: break-word;
 }
 .mascot-slot.on .mascot-slot-name { color: var(--c-accent); }
 .mascot-slot .mascot-slot-add {

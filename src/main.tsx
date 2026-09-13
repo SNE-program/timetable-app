@@ -25,7 +25,14 @@ if (typeof window !== 'undefined'
     || window.location.search.indexOf('framecheck=1') >= 0
     || window.location.search.indexOf('perf') >= 0
     || window.location.search.indexOf('widgetcheck') >= 0
-    || window.location.search.indexOf('behavecheck') >= 0)) {
+    || window.location.search.indexOf('behavecheck') >= 0
+    /* 后加的几个检查也要在这里放行：漏掉的话，它们在**子框架里**（窄屏测量用的 iframe）
+       根本不会跑 —— 而"没跑"和"跑了没问题"在无头环境下看起来一模一样。 */
+    || window.location.search.indexOf('dragcheck') >= 0
+    || window.location.search.indexOf('histcheck') >= 0
+    || window.location.search.indexOf('ovcheck') >= 0
+    || window.location.search.indexOf('clipcheck') >= 0
+    || window.location.search.indexOf('wp=1') >= 0)) {
   runDiagnostics();
 }
 

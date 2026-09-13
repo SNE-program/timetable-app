@@ -1,6 +1,27 @@
 /* ============================ 本周课表 ============================ */
 /* 手机上周视图尽量占满宽度：左右只留 5px，把省下的空间全给课程卡 */
+/* 手机上周视图尽量占满宽度：左右只留 5px，把省下的空间全给课程卡 */
 .week-scroll { padding: 0 5px; }
+/*
+ * 课表主体的横向滚动容器。
+ *
+ * 起因：一周排 7 天时，360px 屏幕里每列只有 30 多像素 —— 课程名折成三行、
+ * 教室名被省略号吃掉（"实验楼 C101" → "实…"）。与其让每张卡上的字都残缺，
+ * 不如给每天一个最小可读宽度（--col-min），放不下就让人横着滑。
+ *
+ * 周头与网格都放在 .week-inner 里，用同一个宽度公式 —— 分开算的话两者会对不齐。
+ */
+.week-scroll-x {
+  overflow-x: auto; overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+.week-scroll-x::-webkit-scrollbar { display: none; }
+.week-inner {
+  --col-min: 62px;
+  min-width: max(100%, calc(var(--axis-w) + var(--cols, 7) * var(--col-min)));
+}
 .week-bar { display: flex; align-items: center; gap: 8px; padding: 9px 6px 8px; }
 .week-range { font-size: var(--fs-xs); color: var(--c-text-muted); white-space: nowrap; flex: 0 0 auto; }
 
@@ -54,8 +75,23 @@
 }
 .ev:hover { border-color: var(--c-border-strong); }
 .ev .ev-name { font-weight: 600; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
-.ev .ev-room { opacity: .62; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ev .ev-teacher { opacity: .5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/*
+ * 教室与教师：**折行，不用省略号**。
+ *
+ * 省略号在这里是最糟的选择："实验楼 C101" 被截成"实验…"之后，
+ * 剩下的信息量为零，而卡片宽度本来就只够放两行小字。
+ * 折行至少能把"实验楼"和"C101"都留住。
+ */
+.ev .ev-room {
+  opacity: .62;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; word-break: break-word;
+}
+.ev .ev-teacher {
+  opacity: .5;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; word-break: break-word;
+}
 .ev .ev-flag { position: absolute; top: 2px; right: 2px; font-size: 10px; line-height: 1.3; padding: 0 3px; border-radius: 2px; background: var(--c-danger); color: #fff; }
 
 .ev[data-style="line"] {

@@ -44,7 +44,18 @@ export default function MascotShareSheet() {
     showToast('已选中，长按复制即可', 'info');
   }
 
-  const row = s.cloud.mascots.filter(function (m) { return m.id === info.id; })[0];
+  /*
+   * 停止分享：按 id 直接改，**不再要求那一行出现在当前列表里**。
+   * 以前是从 s.cloud.mascots 里找那一行，找不到（列表还没刷新、或这个角色是从分享码取回来的）
+   * 按钮就点了没反应 —— 用户看到的是一个假的按钮。
+   */
+  const infoId = info.id;
+  const infoName = info.name;
+  const row = s.cloud.mascots.filter(function (m) { return m.id === infoId; })[0];
+  async function stopShare(): Promise<void> {
+    const ok = await cloudUnshareMascot(row || { id: infoId, name: infoName });
+    if (ok) closeShareSheet();
+  }
 
   return (
     <Sheet
@@ -78,7 +89,7 @@ export default function MascotShareSheet() {
         <button
           className="btn sm ghost"
           disabled={s.cloud.mascotsStage !== ''}
-          onClick={function () { if (row) void cloudUnshareMascot(row); }}
+          onClick={function () { void stopShare(); }}
         >停止分享</button>
       </div>
 

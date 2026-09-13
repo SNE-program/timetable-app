@@ -33,15 +33,20 @@ function PresetCard(props: { preset: ThemePreset; active: boolean; onPick: () =>
       >
         {[0, 1, 2, 3].map(function (i) {
           const h = 22 - i * 2;
+          /*
+           * 位置用百分比而不是写死像素：卡片固定 96px 宽，写死 left=81+width=18
+           * 会顶到卡片外面（第 4 根色条被裁掉一截）。
+           * 百分比让缩略图随卡片宽度自适应，也顺手解决了"最后一根总是缺一角"。
+           */
           return (
             <div
               key={i}
               className="bar"
               style={{
                 background: palette[(i * 3) % 12],
-                left: 9 + i * 24,
+                left: (6 + i * 24) + '%',
                 top: 12 + (i % 2) * 22,
-                width: 18,
+                width: '18%',
                 height: h,
                 borderRadius: theme.radius > 16 ? 7 : 3,
                 opacity: 0.92,

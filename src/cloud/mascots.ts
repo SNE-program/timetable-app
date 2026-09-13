@@ -139,7 +139,15 @@ export function estimateMascotBytes(pack: MascotPack): { bytes: number; missingA
 }
 
 export async function listMascots(token: string | null): Promise<CloudMascot[]> {
-  const q = '/rest/v1/mascots?select=id,user_id,name,is_public,path,size_bytes,created_at,updated_at,share_code&order=created_at.desc&limit=60';
+  /*
+   * share_code 这一列**只在登录后请求**。
+   *
+   * 服务端已经收回了 anon 对这一列的读权限（见 supabase/schema-mascot-share-lock.sql）：
+   * 分享码是凭据，不能被"没登录的人列出所有公开角色"顺手捎走 ——
+   * 未登录的人本来也不需要看别人的码，他是来**用**码的。
+   */
+  const cols = 'id,user_id,name,is_public,path,size_bytes,created_at,updated_at' + (token ? ',share_code' : '');
+  const q = '/rest/v1/mascots?select=' + cols + '&order=created_at.desc&limit=60';
   const json = await cloudRequest('GET', q, token ? { token: token } : {});
   return Array.isArray(json) ? (json as CloudMascot[]) : [];
 }

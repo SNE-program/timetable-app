@@ -20,6 +20,7 @@ import ChangelogSheet from '../ui/ChangelogSheet';
 import HistorySheet from '../ui/HistorySheet';
 import MascotCenterSheet from '../ui/MascotCenterSheet';
 import ShortcutSheet from '../ui/ShortcutSheet';
+import MascotShareSheet from '../ui/MascotShareSheet';
 import PasswordSheet from '../ui/PasswordSheet';
 import CloudSheet from '../ui/CloudSheet';
 import UpdateSheet from '../ui/UpdateSheet';
@@ -622,6 +623,13 @@ export default function App() {
       {/* 角色中心：换一个 / 做一个 / 分享与获取 —— 角色的所有入口都收在这一处 */}
       {s.mascotCenter ? <MascotCenterSheet /> : null}
       {s.shortcutSheet ? <ShortcutSheet /> : null}
+      {/*
+        分享码弹层放在**最外层**。
+        它原来只挂在云弹层里面，于是从「角色中心 → 分享与获取」生成分享码之后
+        什么都看不到 —— 码是发出来了，界面上却没有地方显示它（云弹层根本没开）。
+        分享是角色中心里的动作，弹层就不该依赖"另一个弹层恰好开着"。
+      */}
+      {s.cloud.shareSheet ? <MascotShareSheet /> : null}
       {s.manualSheet ? <ManualView /> : null}
       {s.changelogSheet ? <ChangelogSheet /> : null}
 

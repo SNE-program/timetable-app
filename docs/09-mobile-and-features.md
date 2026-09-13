@@ -4094,3 +4094,79 @@ App 的键位处理从硬编码 `if` 改成查表；弹层开着时导航命令 
 - 单测 605 / 35 个文件；`tsc --noEmit` 0 错误；Android `compileDebugJavaWithJavac` 通过。
 - 布局扫描：本周 / 今日 / 角色中心三页 / 快捷键页，320 / 360 / 390 全部 OVERFLOW 0、SMALL_TAP 0。
 - 行为自检：`?dragcheck=1`（两个拖动场景 + 撤销）、`?histcheck=3`、`?ovcheck=1`、`?widgetcheck=1`、`?wp=1`。
+---
+
+## 十七、分享/公开的功能缺陷，与全站文字截断的排查（v1.9.7）
+
+反馈原文：**「角色分享及公开的功能有问题，同时UI也出现了大量文字因宽度被截断的现象。请严肃优化。」**
+
+### 1. 分享码生成之后看不到它
+
+1.9.6 把生成分享码的入口搬进了「角色中心 → 分享与获取」，但**显示码的那个弹层还挂在 `CloudSheet` 里**：
+`cloudShareCurrent` 设了 `cloud.shareSheet`，而 `MascotShareSheet` 只在云弹层打开时才渲染 ——
+点完只得到一句「分享码已生成」，码本身在界面上任何地方都不存在。这是典型的"搬了入口没搬出口"。
+
+修法：把 `MascotShareSheet` 提到 App 顶层渲染。并新增 `?open=sharecode` 开发参数，
+让探针可以直接量这个弹层（实测：码 `7KQ2M9XF` 在输入框里，两个按钮都在，三档宽度 OVERFLOW 0）。
+
+### 2. 「公开」在新入口里消失，「停止分享」是个死按钮
+
+- 公开开关只在 `MascotCloudSection` 里（云弹层），角色中心没带 → 现在「换一个 → 云端」每行都有，同一接口；
+- `cloudUnshareMascot(m)` 要求那一行在当前列表里，`row` 为 undefined 时按钮点了没反应 → 改成按 id 直接停用并返回布尔值。
+
+### 3. 分享码可以被未登录的人列出来（服务端）
+
+用 anon key 直接打线上接口时发现的：
+
+```
+GET /rest/v1/mascots?select=id,name,share_code  →  200  [{"name":"黍","share_code":"C8KVFUZ6",…}]
+```
+
+码是凭据，能被枚举就等于没有。修法是 `supabase/schema-mascot-share-lock.sql`：
+
+```sql
+revoke select on public.mascots from anon;
+grant select (id, user_id, name, is_public, path, size_bytes, created_at, updated_at) on public.mascots to anon;
+```
+
+**这里踩了一个值得记住的坑**：第一版只写 `revoke select (share_code) …`，跑完看起来"成功了"，
+但 anon 依然读得到 —— 因为**表级授权覆盖所有列**，而 `information_schema.column_privileges` 会把表级授权
+铺到每一列上显示，看上去像是列级授权。必须撤表级、再按列授回。
+
+实测结果：anon 读其余 8 列 200；带 `share_code` **401**；`resolve_mascot_share` 用真实码仍 200
+（下载 4.7MB 对象成功）；`authenticated` 不受影响。
+
+### 4. 文字截断：先量化，再修
+
+「大量文字被截断」这种描述没法直接改代码，先把它变成数字：
+
+- `?clipcheck=1`：遍历 DOM，区分**截断**（overflow hidden / ellipsis / 行数限制真的吃掉了内容）与**溢出但可见**；
+- 窄屏探针：Edge 无头窗口最小 504px，量不到 320/360，于是用**精确宽度的 iframe** 装应用跨文档统计，
+  并报出"是谁把盒子撑破的"。
+
+第一轮结果（320/360/390）：
+
+| 位置 | 实宽 / 需要 | 症状 |
+| --- | --- | --- |
+| `.ev-room`（课表卡教室） | 27~33 / 55~61 | 一周 7 天时**每张卡的教室名都被省略号吃掉** |
+| `button.preset-card` | 94 / 99 | 一排八张主题卡的名字全被切 |
+| `.mascot-slot-name` | 44 / 55 | 「长时间没动」→「长时间…」 |
+| `.topbar-row` | 300 / 305 | 学期名被截 |
+
+**同时纠正了两个测量口径的错**（不纠正会一直修错东西）：
+
+1. 「可点区域」是 `::after/::before` 往外扩的绝对定位伪元素，不占布局却计入 `scrollWidth` ——
+   扣掉它之后，`icon-btn` 32/38、`week-pill` 36/38 这些"溢出"全部消失（本来就是假阳性）；
+2. `OVERFLOW` 原来靠一串选择器豁免横向滚动区，课表主体改成可横滑之后漏了它，一次报出 16 条假溢出；
+   改成按样式判断（祖先有 `overflow-x: auto/scroll` 就不算），这才是可持续的写法。
+
+### 5. 结构性的修法
+
+一周 7 天塞进 320px，每列 30 多像素 —— 不是字号问题，是**没有空间**。所以：
+
+- 给课表主体一个最小列宽并允许横向滚动（`--col-min: 62px`）；
+- 能横滑时横滑＝看后面的天，不能横滑时横滑＝翻周（原有手势不丢）；翻周也一直能用周次按钮与 ← →；
+- 教室/教师名改成两行折行（省略号在这里信息量为零）；预览卡名字、状态格名字、顶栏学期名同理；
+- 预览卡色条从写死像素改成百分比（原来第 4 根 99px > 卡宽 94px，被裁掉一角）。
+
+复测：**截断 0 处**，OVERFLOW 0 / SMALL_TAP 0。
