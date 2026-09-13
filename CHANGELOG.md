@@ -67,6 +67,8 @@
 | 版本 | versionCode **64** / versionName **1.9.3** |
 | 新增文件 | `supabase/schema-mascot-share.sql`、`src/ui/MascotShareSheet.tsx` |
 | 主要改动 | `src/cloud/mascots.ts`、`src/app/store.ts`、`src/ui/MascotCloudSection.tsx`、`src/ui/CloudSheet.tsx`、说明书、角色包规范 |
+| Android | `课表助手-v1.9.3.apk` · 9.23 MB（9,686,923 字节）· SHA-256 `CE39514C588A3859F93A7041391DAB9D8CC4627F5778DB8EA33495844F5D6F14` · 由 tag `v1.9.3` 触发的 CI 构建 · 与前几版同一张证书 |
+| 关键验收 | CI 的「核对安装包里有没有云端配置」这一步通过；把线上那份 APK 拆开确认过 `mascots` 桶与 RPC 路径都在产物里 |
 
 ---
 
