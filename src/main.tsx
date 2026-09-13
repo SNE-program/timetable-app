@@ -24,6 +24,7 @@ if (typeof window !== 'undefined'
   && (window.location.search.indexOf('diag=1') >= 0
     || window.location.search.indexOf('framecheck=1') >= 0
     || window.location.search.indexOf('perf') >= 0
+    || window.location.search.indexOf('widgetcheck') >= 0
     || window.location.search.indexOf('behavecheck') >= 0)) {
   runDiagnostics();
 }

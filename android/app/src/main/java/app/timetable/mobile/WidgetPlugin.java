@@ -3,7 +3,6 @@ package app.timetable.mobile;
 import android.appwidget.AppWidgetManager;
 import android.content.ComponentName;
 import android.content.Context;
-import android.content.Intent;
 
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -13,6 +12,7 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 
 import app.timetable.mobile.widget.NextClassWidgetProvider;
 import app.timetable.mobile.widget.TimetableWidgetProvider;
+import app.timetable.mobile.widget.WidgetRefresh;
 import app.timetable.mobile.widget.WidgetStore;
 
 /**
@@ -81,22 +81,8 @@ public class WidgetPlugin extends Plugin {
         return ids != null && ids.length > 0;
     }
 
+    /** 刷新两个小组件（和闹钟到点自刷新走的是同一段代码，见 WidgetRefresh） */
     private static void refreshAll(Context ctx) {
-        update(ctx, TimetableWidgetProvider.class);
-        update(ctx, NextClassWidgetProvider.class);
-    }
-
-    private static void update(Context ctx, Class<?> provider) {
-        try {
-            AppWidgetManager mgr = AppWidgetManager.getInstance(ctx);
-            int[] ids = mgr.getAppWidgetIds(new ComponentName(ctx, provider));
-            if (ids == null || ids.length == 0) return;
-            Intent intent = new Intent(ctx, provider);
-            intent.setAction(AppWidgetManager.ACTION_APPWIDGET_UPDATE);
-            intent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids);
-            ctx.sendBroadcast(intent);
-        } catch (Exception e) {
-            /* 刷新失败不该影响主流程 —— 小组件只是锦上添花 */
-        }
+        WidgetRefresh.all(ctx);
     }
 }

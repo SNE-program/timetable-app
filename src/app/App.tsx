@@ -23,7 +23,7 @@ import UpdateSheet from '../ui/UpdateSheet';
 import SyncSheet from '../ui/SyncSheet';
 import { onNotified, syncReminders } from './reminderRuntime';
 import { watchSystemTimeChanges } from './rescheduleWatch';
-import { consumePendingOpen } from '../platform/widget';
+import { consumePendingOpen, pushWidgetData } from '../platform/widget';
 import { getNotifier } from '../platform';
 import { applyThemeToDom } from '../theme/apply';
 import { weekOfDate, todayISO, toISODate, dateOf } from '../core/engine';
@@ -122,6 +122,18 @@ export default function App() {
       });
     });
   }, []);
+
+  /*
+   * 课表一变就把桌面小组件的数据推过去。
+   *
+   * 提醒排程里也推一次，但那条路要等通知通道就绪（甚至可能失败）；
+   * 桌面显示"今天有什么课"不该被通知权限拖住，所以这里独立推一次。
+   * 桥接调用很轻，失败也静默（小组件只是锦上添花）。
+   */
+  React.useEffect(function () {
+    if (!isNativePlatform()) return;
+    void pushWidgetData(s.data);
+  }, [s.data]);
 
   /**
    * 桌面小组件点进来 → 打开对应课程的详情（计划书 6.5 节）。

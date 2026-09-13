@@ -10,6 +10,7 @@
  */
 import { getState, storeEmitCount } from './store';
 import { renderCounts } from './renderCount';
+import { UPCOMING_MAX, buildWidgetPayload, widgetBoundaryMs } from '../platform/widget';
 import { renderTimetableImage } from '../ui/timetableImage';
 import { platformName } from '../platform/nativeBridge';
 
@@ -451,9 +452,54 @@ function runPerfCheck(seconds: number): void {
   }, Math.max(3000, seconds * 1000));
 }
 
+/**
+ * 小组件自检（`?widgetcheck=1`）。
+ *
+ * 回答的问题："应用到底往桌面推了什么，桌面又会在什么时候自己翻页？"
+ *
+ * 应用与桌面隔着两个进程，出了问题很难说清是哪一头 —— 所以把**推过去的那份数据**
+ * 与**下一次自动刷新的时刻**直接打出来，和手机上的小组件对一眼就知道。
+ */
+function runWidgetCheck(): void {
+  const st = getState();
+  const now = Date.now();
+  const p = buildWidgetPayload(st.data, new Date(now));
+  const next = p.upcoming.filter(function (it) { return it.endMs > now; })[0] || null;
+  const remain = p.today.filter(function (it) { return it.endMs > now; });
+  const boundary = widgetBoundaryMs(p, now);
+  const hm = function (ms: number): string {
+    const d = new Date(ms);
+    return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+  };
+  const lines = [
+    'WIDGET 学期=' + (p.term || '(空)'),
+    'todayIso=' + p.todayIso,
+    '今天还剩=' + remain.length + ' 节',
+    'upcoming=' + p.upcoming.length + ' 节（上限 ' + UPCOMING_MAX + '）',
+    next
+      ? '下一节=' + next.dayLabel + ' ' + next.title + ' ' + next.start + '-' + next.end + ' ' + next.period
+        + '（' + (next.startMs > now
+          ? '还有 ' + Math.round((next.startMs - now) / 60000) + ' 分钟开始'
+          : '正在上，' + Math.round((next.endMs - now) / 60000) + ' 分钟后下课') + '）'
+      : '下一节=（没有更多课了）',
+    '桌面下次自刷新=' + hm(boundary) + '（距现在 ' + Math.round((boundary - now) / 60000) + ' 分钟）',
+  ];
+  const text = lines.join(' | ');
+  const pre = document.createElement('pre');
+  pre.id = 'widgetcheck';
+  pre.style.cssText = 'position:fixed;left:0;bottom:0;z-index:99999;font:10px monospace;'
+    + 'background:#000;color:#0f0;margin:0;padding:4px;white-space:pre-wrap;';
+  pre.textContent = lines.join(String.fromCharCode(10));
+  document.body.appendChild(pre);
+  let send = function (_t: string): void { /* 默认不回传 */ };
+  try { send = makeReporter(new URLSearchParams(window.location.search).get('report') || ''); } catch (e) { /* 忽略 */ }
+  send(text);
+}
+
 export function runDiagnostics(): void {
   const params = new URLSearchParams(window.location.search);
 
+  if (params.get('widgetcheck')) runWidgetCheck();
   if (params.get('perf')) {
     const sec = Number(params.get('perf'));
     runPerfCheck(isFinite(sec) && sec >= 3 ? Math.min(120, sec) : 10);

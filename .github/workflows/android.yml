@@ -57,8 +57,19 @@ jobs:
 
       - uses: android-actions/setup-android@v3
 
+      # 这两个变量必须和网页版一致：APK 里的 Web 产物如果没有云端配置，
+      # cloudConfigured() 就是 false —— **安卓版界面上根本不会出现云备份与云端角色的入口**。
+      # v1.9.1 的安装包就是这么漏掉的（网页版有、安卓版没有），所以这里除了注入，
+      # 下面还有一步"打包后核对产物里到底有没有"。
       - name: 构建 Web 产物并同步到 Android
+        env:
+          VITE_SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
         run: |
+          if [ -z "$VITE_SUPABASE_URL" ] || [ -z "$VITE_SUPABASE_ANON_KEY" ]; then
+            echo "::warning::没有配 SUPABASE_URL / SUPABASE_ANON_KEY，这一版会打成完全离线的包（安卓上没有云备份入口）"
+          fi
           npm run build
           npx cap sync android
 
@@ -87,6 +98,24 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon
+
+      # 这一条是被真实事故逼出来的：v1.9.1 的 APK 里没有云端配置，
+      # 而"少了入口"这种事在构建日志里一点痕迹都没有。所以打包后直接查产物正文。
+      - name: 核对安装包里有没有云端配置
+        env:
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+        run: |
+          HOST=$(printf '%s' "$SUPABASE_URL" | sed -E 's#^https?://##; s#/.*$##')
+          if [ -z "$HOST" ]; then
+            echo "没配 SUPABASE_URL，跳过核对（这一版本来就是完全离线的包）"
+            exit 0
+          fi
+          if grep -rqsF "$HOST" android/app/src/main/assets/public/assets/; then
+            echo "✓ 安装包里带着云端配置（$HOST）"
+          else
+            echo "::error::安装包里没有云端配置（$HOST）—— 安卓版的云备份与云端角色入口会整个消失"
+            exit 1
+          fi
 
       - name: 校验签名
         run: |

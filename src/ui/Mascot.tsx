@@ -288,12 +288,10 @@ export default function MascotOverlay() {
         stirMs: dozeDev ? dozeDev.stirMs : undefined,
         wakeMs: dozeDev ? dozeDev.wakeMs : undefined,
         /*
-         * 自发小动作的频率：默认 0.14（少一些自己的简易动画）；
-         * 角色包**自带 react 素材**时调高 —— 那时候播的是素材自己的动画，
-         * 多来几次正是"变化多基于给定动画"。
+         * 作者自己画了走动素材，那就多走两步（见 motion.ts 的 walkBias）。
+         * 这里**没有**"自发小动作"的概率了 —— 一次性的反应只有用户点它才会播，
+         * 自然状态就三个：待机、走路、休息。
          */
-        selfChance: reactAssetOk ? 0.3 : undefined,
-        /* 作者自己画了走动素材，那就多走两步（见 motion.ts 的 walkBias） */
         walkBias: walkAssetOk ? 2.2 : 1,
       };
       const next = advance(rt, now, dragRef.current.active, opts);

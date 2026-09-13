@@ -3,67 +3,51 @@ import type { MascotMotion, MascotState } from './types';
 /**
  * 角色的状态机。
  *
+ * ## 三个自然状态
+ *
+ * 没人管它的时候，它只在**三种样子**之间切换：
+ *
+ *   待机（breathe）—— 站着，播角色包自己的待机动画（呼吸与浮动由素材参数决定）
+ *   走路（walk）—— 在"家"附近挪几步；角色包里有 walk 素材就用那张，没有就用程序化的迈步
+ *   休息（sleep 相位）—— 睡着；有 sleep 素材就用那张
+ *
+ * 这是一次**减法**：更早的版本里还有抖一下 / 伸懒腰 / 抬起头 / 打哈欠 / 东张西望 / 点头
+ * 这几样自己编的小动作，以及"没人点也会自己蹦一下"的自发反应。它们的问题不在于难看，
+ * 而在于**它们和角色包本身的动画打架** —— 作者画好的动作被一堆 transform 盖住，
+ * 看起来像一张被推来推去的贴纸。所以：
+ *
+ *   - 自然状态只剩三个；一次性的反应**只有真的点它才会播**；
+ *   - 有 `react` 素材的包，点一下直接播素材，我们那层动作完全不叠加；
+ *   - 左右摇摆（rotate）在任何情况下都不会被放大（见 motionVars）。
+ *
  * ## 两层结构
  *
- *   外层是**相位**（phase）：idle / react / sleep / drag —— 它表达的是"用户能对它做什么"，
- *   语义必须稳定，所以只有四个，切换条件也都是硬的（有人点、有人在拖、多久没人理）。
+ *   外层是**相位**（phase）：idle / react / sleep / drag —— 表达"用户能对它做什么"，
+ *   只有四个，切换条件都是硬的（有人点、有人在拖、多久没人理）。
  *
- *   内层是**微动作**（behavior）：呼吸、抖一下、伸展、抬头、打哈欠 ——
- *   它表达的是"它现在像不像活的"。这一层是随机的：每次做完一个动作，
- *   过多久做下一个、做哪一个、幅度和快慢多少，都是当场掷出来的。
+ *   内层是**当前动作**（behavior）：待机还是走路。随机的是**什么时候换、走多久**，
+ *   而不是"再变出几种动作来"。
  *
- * 只有外层的话，它就是一台节拍器：两条固定周期的正弦（5.2s / 6.8s）永远同相位，
- * 看三秒就知道在循环。加上内层之后，节奏与幅度每次都不一样。
- *
- * ## 打盹循环：久等也不会"卡"在同一个动画上
- *
- * 光是"睡着了就一直播睡觉那一张"仍然是一种节拍器 —— 只不过周期变成了几分钟。
- * 所以睡着之后并不是一动不动：每隔一段随机时间（45–150 秒）它会**醒一小会儿**，
- * 那一小段里走的是**完全正常的动作池**（会走动、会张望、会点头），
- * 然后打个哈欠再睡回去。这就是「等了几分钟之后不要一直显示同一种动画」那条要求。
- *
- * 半夜里看到的应该是：睡 → 翻身 → 睡 → 醒一下走两步 → 打哈欠 → 睡 …
- *
- * 另外还有**自发小动作**：没人点它的时候，它自己偶尔也会蹦一下、凑过来看。
- * 有 `react` 素材的包直接播那张素材，没有才复用"被点"那套程序化动画（rx-*）——
- * 于是任何素材形态都看得到反应，而作者画过的动作优先。
- *
- * ## 为什么随机数要"注入"
+ * ## 随机数必须注入
  *
  * 这个文件里**没有一处调用 Math.random** —— 随机源由调用方通过 `rng` 传进来
- * （生产用 Math.random，测试传固定种子）。这样：
- *
- *   - 状态机仍然是纯函数：同一个种子 + 同一串时间戳 = 完全相同的动作序列，能单测；
- *   - "偶尔卡在某个动作不动"这类问题可以复现、可以二分；
- *   - 不会出现"测试里跑一次通过、线上跑一次不通过"的随机失败。
- *
- * 反面教材就在上一版：`blinkDelay(seed)` 用一个固定公式 + 每次 +1.37 的计数器假装随机，
- * 结果是**每个用户、每次启动看到的眨眼节奏一模一样**。
+ * （生产用 Math.random，测试传固定种子）。于是状态机是纯函数：
+ * 同一个种子 + 同一串时间戳 = 完全相同的动作序列，可复现、可单测。
  */
 
 export type MascotPhase = 'idle' | 'react' | 'sleep' | 'drag';
 
-/** 微动作。幅度与快慢的乘数也在这里定义，`motionVars` 用它换算 CSS 变量 */
-export type MascotBehavior =
-  | 'breathe' | 'fidget' | 'stretch' | 'perk' | 'yawn' | 'walk' | 'nod';
-
 /**
- * 三条动画通道（呼吸缩放 / 上下浮动 / 左右摇摆）各自乘多少。
- *
- * 只有"快慢 + 总幅度"两个旋钮的话，所有动作都是同一个形状换个速度 ——
- * 看久了会觉得"它只是抖得不一样"。加上每通道的配比之后，
- * "点头"（几乎只在上下动）和"张望"（几乎只在左右摆）才是两种**看得出不一样**的动作。
+ * 自然动作。**只有两个** —— 休息不是动作，是相位（见文件开头）。
  */
-export interface ChannelMix { breathe: number; bob: number; sway: number }
+export type MascotBehavior = 'breathe' | 'walk';
 
 /**
  * 被点一下时的反应变体。
  *
  * 角色包**自带 react 素材**时，反应直接播那一张（`assetKeyFor` 会切过去）；
- * 没有素材才退回这里的程序化动作 —— 这也是"变化多基于给定动画"的落点。
- *
- * 原来的 `sway`（晃两下）删掉了：它就是纯粹的左右摇摆，是这套程序化动作里
- * 最容易被看出来"假"的一个。
+ * 没有素材才退回这里的程序化动作。
+ * 这些反应**只会在真的点它时播**，不会自己冒出来。
  */
 export type MascotReaction = 'hop' | 'startle' | 'peek';
 
@@ -78,27 +62,22 @@ export interface MascotRuntime {
   lastTouch: number;
   /** 相位开始前的状态，react 结束后要回到它 */
   before: MascotPhase;
-  /** 内层：当前微动作 */
+  /** 内层：当前动作（待机 / 走路） */
   behavior: MascotBehavior;
-  /** 这个微动作做到什么时候 */
+  /** 这个动作做到什么时候 */
   behaviorUntil: number;
-  /** 最近两次做过的微动作（越靠前越近），用来避免连着重复 */
+  /** 最近两次做过的动作（越靠前越近），用来避免连着重复 */
   recent: MascotBehavior[];
-  /** 这次微动作的抖动系数：让同样的动作每次的快慢幅度都略有不同 */
+  /** 这次动作的抖动系数：同样的动作每次的快慢幅度都略有不同 */
   jitter: { speed: number; amp: number };
   /** 正在播的一次性反应；没有就是 null */
   reaction: MascotReaction | null;
   reactionUntil: number;
   /** 最近两次播过的反应 */
   recentReactions: MascotReaction[];
-  /** 反应序号：每播一次反应 +1（被点的、自发的都算），界面靠它可靠地重启动画 */
+  /** 反应序号：每播一次反应 +1，界面靠它可靠地重启动画 */
   reactionSeq: number;
-  /**
-   * 「半醒」到什么时候（0 = 没在半醒）。
-   *
-   * 睡着之后每隔一会儿会醒一小段，这一小段里走正常的动作池（含走动），
-   * 到点再打一个哈欠睡回去 —— 见文件开头那段「打盹循环」。
-   */
+  /** 「半醒」到什么时候（0 = 没在半醒），见下面的打盹循环 */
   stirUntil: number;
   /** 睡着时，下一次"醒一下"安排在什么时候（0 = 不适用） */
   nextStirAt: number;
@@ -114,56 +93,30 @@ export const STIR_MAX_MS = 150 * 1000;
 /** 每次"醒一下"持续多久（区间）—— 太短看不见走动，太长就不像在睡 */
 export const STIR_WAKE_MIN_MS = 4000;
 export const STIR_WAKE_MAX_MS = 14000;
-/**
- * 自发小动作的概率：没人点它的时候，一个动作做完之后它自己来一下的概率。
- *
- * 从 0.28 降到 0.14：这一版的原则是**变化尽量来自角色包自带的动画**，
- * 程序化的小动作用得越少越好。角色包**自带 react 素材**时，
- * 调用方会把它调回去（见 AdvanceOpts.selfChance）—— 那时候播的是素材本身。
- */
-export const SELF_ACTION_CHANCE = 0.14;
-/** 自发小动作只从这两个里挑：`startle`（被吓一跳）没人惹它就播会显得莫名其妙 */
-export const SELF_REACTIONS: MascotReaction[] = ['hop', 'peek'];
+
 /** 眨眼间隔的随机范围 —— 固定节奏会显得像机器 */
 export const BLINK_MIN_MS = 2600;
 export const BLINK_MAX_MS = 6200;
 
-/** 每个微动作的持续时长范围（毫秒）与动画乘数 */
+/**
+ * 两个自然动作的时长与动画乘数。
+ *
+ * `amp` **都不超过 1** —— 这是有意的：素材作者在角色包里设的呼吸 / 浮动 / 摇摆
+ * 就是他要的幅度，我们只压不放大。动作之间的区别靠**素材**（走路那张、睡觉那张），
+ * 而不是靠把同一张图拧得更用力。
+ */
 export const BEHAVIORS: Record<MascotBehavior, {
   minMs: number; maxMs: number; speed: number; amp: number; label: string;
-  /** 每通道配比；不写就是三条通道等权（1:1:1） */
-  mix?: ChannelMix;
 }> = {
-  /** 基础状态：慢呼吸。占的时间最多，用来衬托其它动作 */
-  breathe: { minMs: 5200, maxMs: 13000, speed: 1, amp: 1, label: '呼吸' },
-  /** 抖一下：快而小的动作，能量高的时候多 */
-  fidget: { minMs: 620, maxMs: 1500, speed: 0.42, amp: 1.5, label: '抖一下' },
-  /** 伸展：慢而大，能量低或刚睡醒时多 */
-  stretch: { minMs: 2200, maxMs: 3800, speed: 1.65, amp: 1.85, label: '伸个懒腰' },
-  /** 抬头：中速、幅度偏大，像是"注意到什么了" */
-  perk: { minMs: 1200, maxMs: 2300, speed: 0.75, amp: 1.3, label: '抬起头' },
-  /** 打哈欠：慢而小，深夜和长时间没人理的时候多 */
-  yawn: { minMs: 2000, maxMs: 3400, speed: 2.1, amp: 0.75, label: '打个哈欠' },
+  /** 待机：慢呼吸，占的时间最多 */
+  breathe: { minMs: 5200, maxMs: 13000, speed: 1, amp: 1, label: '待机' },
   /**
-   * 来回走走：围绕"家"（用户放它的地方）左右踱几步。
+   * 走来走去：围绕"家"（用户放它的地方）左右踱几步。
    *
-   * 时长明显更长（5–9 秒），因为它要完成的是一整套
-   * "往右 → 回中 → 往左 → 回中"，走完正好回到原位 —— 所以**起止位移都是 0**，
-   * 不会在动作开始或结束时"啪"地跳一下。
-   * speed 略大于 1：浮动快一点看起来才像在迈步，而不是飘。
+   * 时长 4.5–10 秒，要**容得下一整趟步子**（34–72px ÷ 9–14px/s ≈ 2.4–8 秒）——
+   * 更早的版本里动作窗口比一趟步子还短，每趟都被打断，看起来就是"迈了半天还在原地"。
    */
   walk: { minMs: 4500, maxMs: 10000, speed: 1.35, amp: 0.9, label: '来回走走' },
-  /**
-   * 点头打拍子：几乎只在上下动 —— 精力好、又没别的事干的时候。
-   *
-   * 这一个保留而"东张西望"被删掉，是因为那条要求：
-   * **少一些自己的简易动画，尤其是左右摇摆那种**。点头是上下动，
-   * 看起来像在打拍子；左右摆动的旋转在 2D 立绘上很像"歪脖子"，一眼假。
-   */
-  nod: {
-    minMs: 1500, maxMs: 3200, speed: 0.55, amp: 1.0, label: '点头',
-    mix: { breathe: 0.25, bob: 1.5, sway: 0.2 },
-  },
 };
 
 /** 反应变体的时长（毫秒），与 CSS 里的动画时长一一对应 */
@@ -173,8 +126,7 @@ export const REACTIONS: Record<MascotReaction, { ms: number; label: string }> = 
   peek: { ms: 460, label: '凑过来看' },
 };
 
-export const ALL_BEHAVIORS: MascotBehavior[] =
-  ['breathe', 'fidget', 'stretch', 'perk', 'yawn', 'walk', 'nod'];
+export const ALL_BEHAVIORS: MascotBehavior[] = ['breathe', 'walk'];
 export const ALL_REACTIONS: MascotReaction[] = ['hop', 'startle', 'peek'];
 
 function clamp01(n: number): number {
@@ -190,9 +142,8 @@ function pick(rng: Rng, lo: number, hi: number): number {
 /**
  * "能量"：0 = 困得不行，1 = 精神得很。
  *
- * 它不改变相位（那由用户操作决定），只影响**微动作怎么挑**：
- * 能量高 → 抖一下、抬头多，动作快而大；能量低 → 打哈欠、伸展多，动作慢而小。
- * 这就是"性格"从"能看出来"到"能感觉出来"的那一步。
+ * 它不改变相位（那由用户操作决定），也不改变动作种类（只有两个），
+ * 只影响**走路的频率**：精力中等偏上时最想走，深夜或长时间没人理就懒得动。
  */
 export interface EnergyInput {
   /** 0..23 */
@@ -229,69 +180,37 @@ export function energyOf(i: EnergyInput): number {
   return clamp01(e);
 }
 
-/** 挑动作时的两个开关（都缺省为"醒着、能走"） */
+/** 挑动作时的几个开关（都缺省为"醒着、能走"） */
 export interface BehaviorOpts {
   /** 有没有地方走。给 false 时"走走"的权重是 0，永远不会被掷到 */
   allowWalk?: boolean;
-  /** 睡着时的动作池：翻身、打哈欠为主，走动为 0 */
+  /** 睡着时：只会呼吸，不会走动 */
   dozing?: boolean;
   /**
    * "走走"的权重倍数，缺省 1。
    *
    * 角色包**自带 walk 素材**时调用方会给 2 倍上下：作者自己画了走路，
-   * 那就多走两步 —— 这也是"变化多基于给定动画"的一条：有素材的动作优先演。
+   * 那就多走两步 —— 有素材的动作优先演。
    */
   walkBias?: number;
 }
 
 /**
- * 行为权重：能量越低越困，越高越活跃；刚做过的降权，避免连着重复。
+ * 行为权重：只有两项，而且刚做过的那一项会被降权，避免连着重复。
  *
- * `allowWalk` 是给"没地方走"准备的：权重给 0，就永远不会被掷到。
- * `dozing` 是睡着时的另一套池子 —— 睡着了却"东张西望"会很出戏。
- *
- * 第三个参数以前是个裸 boolean，现在也能收一个对象；两种写法都认，
- * 因为老调用方（含单测）传的就是 boolean。
+ * "走走"的曲线在 e=0.7 附近取峰值：精力好的时候爱走动，深夜（e→0）几乎不动。
  */
 export function behaviorWeights(
-  energy: number, recent: MascotBehavior[], opts?: boolean | BehaviorOpts
+  energy: number, recent: MascotBehavior[], opts?: BehaviorOpts
 ): { behavior: MascotBehavior; w: number }[] {
-  const o: BehaviorOpts = typeof opts === 'boolean' ? { allowWalk: opts } : (opts || {});
+  const o: BehaviorOpts = opts || {};
   const e = clamp01(energy);
-  if (o.dozing) {
-    /*
-     * 睡着时的池子。
-     *
-     * 关键的一条：**"走走"必须是 0**。睡着还踱步就不叫睡了。
-     * 剩下的几个也都是"睡着的人会做的动作"：翻身（伸展）、打哈欠、慢呼吸。
-     */
-    return ALL_BEHAVIORS.map(function (b) {
-      const asleep: Record<MascotBehavior, number> = {
-        breathe: 1.3, fidget: 0.12, stretch: 1.4, perk: 0.08,
-        yawn: 1.7, walk: 0, nod: 0.05,
-      };
-      let w = asleep[b];
-      const i = recent.indexOf(b);
-      if (i === 0) w *= 0.15;
-      else if (i === 1) w *= 0.45;
-      return { behavior: b, w: w };
-    });
-  }
+  const bias = o.walkBias && o.walkBias > 0 ? o.walkBias : 1;
   const base: Record<MascotBehavior, number> = {
-    breathe: 1.6,
-    fidget: 0.5 + e * 2.2,
-    stretch: 0.4 + (1 - e) * 1.3,
-    perk: 0.35 + e * 1.5,
-    yawn: 0.25 + (1 - e) * 2.4,
-    /* 点头：有点精神、又没别的事干的时候 */
-    nod: 0.22 + e * 0.75,
-    /*
-     * 走动：精力中等偏上时最想走（睡意上来就不想动了）。
-     * 用一条在 e=0.7 附近取峰值的曲线，而不是线性 —— 深夜（e→0）时它应该接近 0。
-     */
-    walk: o.allowWalk === false
+    breathe: o.dozing ? 1.2 : 1.6,
+    walk: (o.allowWalk === false || o.dozing)
       ? 0
-      : 0.9 * Math.max(0, 1 - Math.abs(e - 0.7) * 2.2) * (o.walkBias && o.walkBias > 0 ? o.walkBias : 1),
+      : 0.9 * Math.max(0, 1 - Math.abs(e - 0.7) * 2.2) * bias,
   };
   return ALL_BEHAVIORS.map(function (b) {
     /* 最近一次 ×0.15，再上一次 ×0.45：偶尔还是允许重复，只是不连着来 */
@@ -317,14 +236,13 @@ export function pickWeighted<T>(items: { behavior: T; w: number }[], rng: Rng): 
 }
 
 /**
- * 掷下一个微动作：做什么、做多久、这次快慢幅度抖多少。
+ * 掷下一个动作：待机还是走路、这个动作做多久、这次快慢幅度抖多少。
  *
- * 规则里有一条是**硬保证**，不只是"降权"：掷出来如果正好是上一次做过的动作，就重掷一次。
- * 只降权的话偶尔还是会连着来两遍 —— 而"连着两次一样的动作"正是"假随机"最容易露馅的地方
- * （单测里 300 次就能复现）。重掷一次只多一次随机调用，代价可以忽略。
+ * 硬保证（不只是降权）：掷出来如果正好是上一次做过的动作，就重掷一次。
+ * 只有两个动作时这条不总能成功（重掷还是它），但降权已经把重复压到很低。
  */
 export function rollBehavior(
-  energy: number, recent: MascotBehavior[], rng: Rng, opts?: boolean | BehaviorOpts
+  energy: number, recent: MascotBehavior[], rng: Rng, opts?: BehaviorOpts
 ): { behavior: MascotBehavior; until: number; jitter: { speed: number; amp: number } } {
   let b = pickWeighted(behaviorWeights(energy, recent, opts), rng);
   if (recent.length > 0 && b === recent[0]) {
@@ -335,7 +253,7 @@ export function rollBehavior(
   return {
     behavior: b,
     until: Math.round(pick(rng, cfg.minMs, cfg.maxMs)),
-    /* 每次都快慢幅度各抖 ±15%：同样的"呼吸"，周期不会永远是 5.2 秒 */
+    /* 每次都快慢幅度各抖 ±15%：同样的动作不会永远同一个节奏 */
     jitter: { speed: pick(rng, 0.85, 1.18), amp: pick(rng, 0.86, 1.14) },
   };
 }
@@ -343,8 +261,7 @@ export function rollBehavior(
 /**
  * 掷一个反应变体，尽量不和上两次重复。
  *
- * `pool` 是给自发小动作用的：它只从 hop / peek 里挑
- * （"被吓一跳"没人惹它就播，看起来会像出了 bug）。
+ * 反应现在**只有用户点它的时候**才会掷到（自发的那些已经删掉了）。
  */
 export function rollReaction(recent: MascotReaction[], rng: Rng, pool?: MascotReaction[]): MascotReaction {
   const all = pool && pool.length > 0 ? pool : ALL_REACTIONS;
@@ -355,7 +272,7 @@ export function rollReaction(recent: MascotReaction[], rng: Rng, pool?: MascotRe
 
 export function initialRuntime(now: number, rng?: Rng): MascotRuntime {
   const r = rng || Math.random;
-  const rolled = rollBehavior(0.5, [], r, false);
+  const rolled = rollBehavior(0.5, [], r, { allowWalk: false });
   return {
     phase: 'idle',
     since: now,
@@ -384,27 +301,18 @@ export interface AdvanceOpts {
   /**
    * 允不允许"来回走走"。缺省允许。
    *
-   * 两种情况下必须传 false：
+   * 两种情况必须传 false：
    *   1. 睡着了 —— 睡着了还踱步就不叫睡了；
    *   2. **它贴边站着、横向没地方走** —— 这时候走一定会越界，
-   *      而"不越过边界"是这功能的前提（半径由 placement.ts 的 walkRadius 算）。
+   *      而"不越过边界"是这功能的前提（半径由 placement.ts 的 walkRoom 算）。
    */
   allowWalk?: boolean;
   /**
-   * 打盹循环的节奏覆盖（毫秒区间）。
-   *
-   * 只给单测与自检用：正常节奏是"睡 45–150 秒 → 醒 4–14 秒"，
-   * 想在一分钟里看到好几轮，就得把这两段压短 —— 否则这条路径只能靠肉眼盯十分钟。
+   * 打盹循环的节奏覆盖（毫秒区间）。只给单测与自检用：正常是"睡 45–150 秒 → 醒 4–14 秒"，
+   * 想在一分钟里看到好几轮，就得把这两段压短。
    */
   stirMs?: { min: number; max: number };
   wakeMs?: { min: number; max: number };
-  /**
-   * 自发小动作的概率。缺省 SELF_ACTION_CHANCE（0.14）。
-   *
-   * 调用方在**角色包自带 react 素材**时会把它调高：那时候播的是素材自己的动画，
-   * 多播几次反而是"变化多基于给定动画"。
-   */
-  selfChance?: number;
   /** "走走"的权重倍数（自带 walk 素材的角色包会给 2 倍上下），见 BehaviorOpts.walkBias */
   walkBias?: number;
 }
@@ -425,25 +333,10 @@ function stirWakeMs(rng: Rng, opts?: AdvanceOpts): number {
  * "刚醒那一下"的精神头。
  *
  * 为什么需要它：`energyOf` 会因为"十几分钟没人理"把能量压到 0.2 上下，
- * 而"走走"的权重在低能量时几乎为 0 —— 直接用原值的话，半醒那一小段只会挑最蔫的动作，
- * 看起来跟没醒一样。刚睁眼总比躺着有精神，这是事实层面的修正，不是给它开挂。
+ * 而"走走"的权重在低能量时几乎为 0 —— 直接用原值的话，半醒那一小段只会站着不动，
+ * 看起来跟没醒一样。刚睁眼总比躺着有精神，这是事实层面的修正。
  */
 const WAKING_ENERGY = 0.62;
-
-/**
- * 自发小动作：没人点它，它自己偶尔也会蹦一下 / 凑过来看。
- *
- * `chance` 由调用方按处境给（醒着 / 半醒 / 睡梦中）。正在播反应时不叠加第二个 ——
- * 一次只播一个，否则两段 transform 动画会互相抢。
- */
-function rollSelfAction(
-  rt: MascotRuntime, rng: Rng, chance: number
-): { kind: MascotReaction; ms: number } | null {
-  if (rt.reaction) return null;
-  if (rng() >= chance) return null;
-  const kind = rollReaction(rt.recentReactions, rng, SELF_REACTIONS);
-  return { kind: kind, ms: REACTIONS[kind].ms };
-}
 
 /**
  * 纯函数地推进状态。调用方**排程在下一个事件时刻调用**即可，
@@ -453,22 +346,27 @@ export function advance(rt: MascotRuntime, now: number, dragging: boolean, opts?
   const rng = (opts && opts.rng) || Math.random;
   const energy = opts && opts.energy !== undefined ? clamp01(opts.energy) : 0.5;
   const stirUntil = rt.stirUntil || 0;
-  /** 半醒：睡着之后那一小段"醒着"，走正常的动作池（含走动） */
+  /** 半醒：睡着之后那一小段"醒着" */
   const stirring = stirUntil > 0 && now < stirUntil;
   /* 睡着了永远不走；调用方还可以因为"没地方走"而关掉它（半醒时是醒着的，所以能走） */
   const walkOk = rt.phase === 'sleep' ? false : !(opts && opts.allowWalk === false);
-  /* 半醒那一小段用"刚醒"的精神头，否则只会挑最蔫的动作 */
+  /* 半醒那一小段用"刚醒"的精神头，否则它只会站着不动 */
   const rollEnergy = stirring ? Math.max(energy, WAKING_ENERGY) : energy;
+  const biasOpts: BehaviorOpts = {
+    allowWalk: walkOk,
+    dozing: rt.phase === 'sleep',
+    walkBias: opts && opts.walkBias,
+  };
 
   if (dragging !== (rt.phase === 'drag')) {
-    /* 拖动开始 / 结束，优先级最高，直接切。拖完给一次"抖一下"，像是被放稳了 */
+    /* 拖动开始 / 结束，优先级最高，直接切。拖完给一次"待机"，像是被放稳了 */
     const end = {
       phase: (dragging ? 'drag' : 'idle') as MascotPhase,
       since: now,
       lastTouch: now,
       before: dragging ? rt.before : ('idle' as MascotPhase),
     };
-    const rolled = rollBehavior(energy, rt.recent, rng, false);
+    const rolled = rollBehavior(energy, rt.recent, rng, { allowWalk: false });
     return Object.assign({}, rt, end, {
       behavior: rolled.behavior,
       behaviorUntil: now + rolled.until,
@@ -504,15 +402,14 @@ export function advance(rt: MascotRuntime, now: number, dragging: boolean, opts?
    * (a) 睡到点了：醒一小会儿。
    *
    * 这是"等了几分钟之后不要一直显示同一种动画"那条要求的落点：
-   * 醒来这一小段走的是**完全正常的动作池**（含走动、张望、点头），
-   * 而不是睡眠那套慢动作 —— 所以长时间挂着能看到睡 → 走两步 → 睡 → 张望 → 睡 这样的来回。
+   * 醒来这一小段走的是**醒着**的池子（会走动），而不是睡姿那一张 ——
+   * 于是长时间挂着能看到 休息 → 走两步 → 休息 这样的来回。
    */
   if (rt.phase === 'sleep' && (rt.nextStirAt || 0) > 0 && now >= (rt.nextStirAt || 0)) {
     const rolled = rollBehavior(Math.max(energy, WAKING_ENERGY), rt.recent, rng, {
       allowWalk: !(opts && opts.allowWalk === false),
       walkBias: opts && opts.walkBias,
     });
-    const self = rollSelfAction(rt, rng, 0.34);
     return Object.assign({}, rt, {
       phase: 'idle' as MascotPhase,
       since: now,
@@ -523,24 +420,20 @@ export function advance(rt: MascotRuntime, now: number, dragging: boolean, opts?
       jitter: rolled.jitter,
       stirUntil: now + stirWakeMs(rng, opts),
       nextStirAt: 0,
-      reaction: self ? self.kind : null,
-      reactionUntil: self ? now + self.ms : 0,
-      reactionSeq: self ? rt.reactionSeq + 1 : rt.reactionSeq,
-      recentReactions: self
-        ? [self.kind].concat(rt.recentReactions).slice(0, 2)
-        : rt.recentReactions,
+      reaction: null,
+      reactionUntil: 0,
     });
   }
 
-  /* (b) 半醒结束：打个哈欠睡回去，并把下一次"醒一下"排上 */
+  /* (b) 半醒结束：睡回去，并把下一次"醒一下"排上 */
   if (rt.phase !== 'sleep' && stirUntil > 0 && now >= stirUntil) {
     return Object.assign({}, rt, {
       phase: 'sleep' as MascotPhase,
       since: now,
       before: 'idle' as MascotPhase,
-      behavior: 'yawn' as MascotBehavior,
-      behaviorUntil: now + Math.round(pick(rng, BEHAVIORS.yawn.minMs, BEHAVIORS.yawn.maxMs)),
-      recent: ['yawn'].concat(rt.recent).slice(0, 2),
+      behavior: 'breathe' as MascotBehavior,
+      behaviorUntil: now + Math.round(pick(rng, BEHAVIORS.breathe.minMs, BEHAVIORS.breathe.maxMs)),
+      recent: ['breathe'].concat(rt.recent).slice(0, 2),
       jitter: { speed: pick(rng, 0.85, 1.18), amp: pick(rng, 0.86, 1.14) },
       stirUntil: 0,
       nextStirAt: nextStirTime(now, rng, opts),
@@ -552,14 +445,18 @@ export function advance(rt: MascotRuntime, now: number, dragging: boolean, opts?
   const sleepAfter = opts && opts.sleepAfterMs !== undefined ? Math.max(3000, opts.sleepAfterMs) : SLEEP_AFTER_MS;
   const idleFor = now - rt.lastTouch;
   if (rt.phase !== 'sleep' && !stirring && idleFor >= sleepAfter) {
-    /* 睡着的那一刻给一个哈欠，比"啪一下不动了"自然 */
+    /*
+     * 睡着的这一刻**不再播一个哈欠** —— 只把相位切到 sleep。
+     * 有 sleep 素材的角色包会换成睡姿那张；没有的就把动作放慢（CSS 的 .sleeping）。
+     * 这一版的原则是"自然状态只有三个"，不再自己加戏。
+     */
     return Object.assign({}, rt, {
       phase: 'sleep',
       since: now,
       before: 'idle',
-      behavior: 'yawn' as MascotBehavior,
-      behaviorUntil: now + Math.round(pick(rng, BEHAVIORS.yawn.minMs, BEHAVIORS.yawn.maxMs)),
-      recent: ['yawn'].concat(rt.recent).slice(0, 2),
+      behavior: 'breathe' as MascotBehavior,
+      behaviorUntil: now + Math.round(pick(rng, BEHAVIORS.breathe.minMs, BEHAVIORS.breathe.maxMs)),
+      recent: ['breathe'].concat(rt.recent).slice(0, 2),
       jitter: { speed: pick(rng, 0.85, 1.18), amp: pick(rng, 0.86, 1.14) },
       stirUntil: 0,
       nextStirAt: nextStirTime(now, rng, opts),
@@ -568,26 +465,16 @@ export function advance(rt: MascotRuntime, now: number, dragging: boolean, opts?
     });
   }
 
-  /* 微动作做完了就掷下一个（睡着时用睡眠那套池子，半醒时用醒着那套） */
+  /* 动作做完了就掷下一个（睡着时只会呼吸，半醒时能走动） */
   if (now >= rt.behaviorUntil) {
-    const rolled = rollBehavior(rollEnergy, rt.recent, rng, {
-      allowWalk: walkOk,
-      dozing: rt.phase === 'sleep',
-      walkBias: opts && opts.walkBias,
-    });
-    const base = opts && opts.selfChance !== undefined ? opts.selfChance : SELF_ACTION_CHANCE;
-    const self = rollSelfAction(rt, rng, rt.phase === 'sleep' ? base * 0.8 : base);
+    const rolled = rollBehavior(rollEnergy, rt.recent, rng, biasOpts);
     return Object.assign({}, rt, {
       behavior: rolled.behavior,
       behaviorUntil: now + rolled.until,
       recent: [rolled.behavior].concat(rt.recent).slice(0, 2),
       jitter: rolled.jitter,
-      reaction: self ? self.kind : reaction,
-      reactionUntil: self ? now + self.ms : rt.reactionUntil,
-      reactionSeq: self ? rt.reactionSeq + 1 : rt.reactionSeq,
-      recentReactions: self
-        ? [self.kind].concat(recentReactions).slice(0, 2)
-        : recentReactions,
+      reaction: reaction,
+      recentReactions: recentReactions,
     });
   }
 
@@ -615,7 +502,11 @@ export function nextWakeAt(rt: MascotRuntime, opts?: AdvanceOpts): number {
   return Math.min.apply(null, times);
 }
 
-/** 用户点了一下：唤醒 + 掷一个反应变体 */
+/**
+ * 用户点了一下：唤醒 + 掷一个反应变体。
+ *
+ * 这是**唯一**会产生反应动画的入口 —— 自发小动作已经删掉了。
+ */
 export function poke(
   rt: MascotRuntime, now: number, rng?: Rng,
   /**
@@ -640,10 +531,10 @@ export function poke(
     /* 被点等于醒了：半醒那一小段取消；如果本来在睡，睡回去之后重新排"醒一下" */
     stirUntil: 0,
     recentReactions: [kind].concat(rt.recentReactions).slice(0, 2),
-    /* 被点之后立刻抖一下，接着才回到呼吸 */
-    behavior: 'fidget' as MascotBehavior,
+    /* 被点之后立刻抖一下，接着才回到待机 */
+    behavior: 'breathe' as MascotBehavior,
     behaviorUntil: now + hold + 120,
-    recent: ['fidget'].concat(rt.recent).slice(0, 2),
+    recent: ['breathe'].concat(rt.recent).slice(0, 2),
     jitter: { speed: pick(r, 0.85, 1.18), amp: pick(r, 0.86, 1.14) },
   });
 }
@@ -667,23 +558,19 @@ export function assetFor(phase: MascotPhase, available: MascotState[]): MascotSt
 }
 
 /**
- * 该用哪张素材 —— 把**微动作**也算进去。
+ * 该用哪张素材 —— 把**动作**与**反应**也算进去。
  *
- * 走动是唯一一个"和相位无关、但值得换素材"的动作：待机和走动都发生在 idle 相位里，
- * 而它们看起来应该完全不一样（一个站着发呆，一个在迈步）。
- * 所以这里多一层判断：相位是 idle、微动作是 walk、而且角色包里**确实有 walk 素材**时，
- * 用 walk；否则沿用相位那套（没有 walk 素材就退回 idle，界面层再用程序化动作补上区别）。
+ * 优先级（这是"变化多基于给定动画"的落点）：
+ *   1. 正在播反应，且包里有 `react` 素材 → 用 react；
+ *   2. 相位是 idle 且在走路，且包里有 `walk` 素材 → 用 walk；
+ *   3. 否则按相位（sleep 有就用 sleep，没有退回 idle）。
+ * 没有对应素材时退回 idle，界面层再用程序化动作把区别补出来（迈步 / rx-*）。
  */
 export function assetKeyFor(
   phase: MascotPhase, behavior: MascotBehavior, available: MascotState[],
-  /** 正在播一次性反应（被点 / 自发的小动作） */
+  /** 正在播一次性反应（被点） */
   reacting?: boolean
 ): MascotState {
-  /*
-   * 反应优先用角色包**自带的 react 素材** —— 那是作者自己画的动作，
-   * 比我们叠一个 transform 好看得多，也是"变化多基于给定动画"这条要求的落点。
-   * 没有 react 素材的包才退回程序化反应（界面层加 rx-* 类）。
-   */
   if (reacting && available.indexOf('react') >= 0) return 'react';
   if (phase === 'idle' && behavior === 'walk' && available.indexOf('walk') >= 0) return 'walk';
   return assetFor(phase, available);
@@ -695,7 +582,6 @@ export function assetKeyFor(
  * 入参是调用方掷出来的 [0,1) 随机数（不是"种子"）——
  * 上一版这里是 `blinkDelay(seed)` 配一个每次 +1.37 的计数器，算式写得像随机，
  * 实际上是**确定性**的：每个用户、每次启动的眨眼节奏完全一样。
- * 现在随机源在外面（生产用 Math.random），这里只负责映射到区间。
  */
 export function blinkDelayFor(t: number): number {
   return Math.round(BLINK_MIN_MS + clamp01(t) * (BLINK_MAX_MS - BLINK_MIN_MS));
@@ -708,9 +594,8 @@ export function blinkDelayFor(t: number): number {
  * 是"一个会动的浮层"唯一安全的做法。改 width/height/margin 会让整页重排，
  * 在 320px 的窄屏上就是可见的卡顿。
  *
- * 现在的周期与幅度是**每次微动作现算的**（叠加 jitter），所以不会再出现
- * "永远 5.2 秒一次"的节拍器感；每条通道还各乘一个配比，
- * 于是"点头"和"张望"不是同一个动作换速度，而是两种形状。
+ * **幅度只减不增**：两个动作的 amp 分别是 1 与 0.9，乘上素材自己的参数之后
+ * 不会超过作者设定的值 —— 尤其是左右摇摆（rotate）那条，放大只会变成"歪脖子"。
  */
 export function motionVars(
   motion: MascotMotion, phase: MascotPhase, behavior: MascotBehavior,
@@ -726,23 +611,10 @@ export function motionVars(
   const factor = phase === 'drag' ? 0 : 1;
   const amp = (cfg.amp * phaseAmp * jitter.amp) * factor;
   const speed = (cfg.speed * phaseSlow * jitter.speed);
-  /*
-   * 每通道配比。不配的动作用 1:1:1（和以前完全一样），
-   * 配了的才会显出"只在上下动"或"只在左右摆"的区别 —— 见 ChannelMix 的说明。
-   */
-  const mix: ChannelMix = cfg.mix || { breathe: 1, bob: 1, sway: 1 };
-  /*
-   * 左右摇摆（rotate）**只减不增**：Math.min(1, ...)。
-   *
-   * 呼吸与上下浮动放大一点看起来是"更活"，而旋转放大只会变成"歪脖子" ——
-   * 2D 立绘转起来一眼就假。所以行为层可以压低它（点头那种 mix），
-   * 但绝不再往上加。素材作者自己设的 sway 是另一回事，照旧生效。
-   */
-  const swayScale = Math.min(1, amp * mix.sway);
   return {
-    '--m-breathe': (motion.breathe * amp * mix.breathe).toFixed(4),
-    '--m-bob': (motion.bob * amp * mix.bob).toFixed(4),
-    '--m-sway': (motion.sway * swayScale).toFixed(2) + 'deg',
+    '--m-breathe': (motion.breathe * amp).toFixed(4),
+    '--m-bob': (motion.bob * amp).toFixed(4),
+    '--m-sway': (motion.sway * amp).toFixed(2) + 'deg',
     /* 呼吸周期 5.2 秒为基准：慢是"高级感"的主要来源，抖是廉价感的主要来源 */
     '--m-speed': (5.2 * speed).toFixed(2) + 's',
     '--m-bob-speed': (6.8 * speed).toFixed(2) + 's',

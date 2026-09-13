@@ -28,4 +28,25 @@ public final class WidgetRender {
         if (delta < 1000L) delta = 1000L;
         return SystemClock.elapsedRealtime() + delta;
     }
+
+    /**
+     * 本机今天的日期（YYYY-MM-DD）。
+     *
+     * 用来和 payload 里的 `todayIso` 比对：隔了几天没打开应用时，那份"今天剩下的课"
+     * 已经过期了，桌面就该换成"接下来的几节课"，而不是把几天前的课当成今天显示。
+     * 用 Calendar 而不是 java.time：minSdk 24 上 java.time 需要 desugar，这里没必要。
+     */
+    public static String todayIso() {
+        java.util.Calendar c = java.util.Calendar.getInstance();
+        int y = c.get(java.util.Calendar.YEAR);
+        int m = c.get(java.util.Calendar.MONTH) + 1;
+        int d = c.get(java.util.Calendar.DAY_OF_MONTH);
+        StringBuilder sb = new StringBuilder();
+        sb.append(y).append('-');
+        if (m < 10) sb.append('0');
+        sb.append(m).append('-');
+        if (d < 10) sb.append('0');
+        sb.append(d);
+        return sb.toString();
+    }
 }

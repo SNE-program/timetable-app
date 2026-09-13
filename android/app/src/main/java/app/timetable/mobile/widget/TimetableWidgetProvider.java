@@ -8,6 +8,8 @@ import android.content.Intent;
 import android.view.View;
 import android.widget.RemoteViews;
 
+import java.util.List;
+
 import app.timetable.mobile.MainActivity;
 import app.timetable.mobile.PendingOpen;
 import app.timetable.mobile.R;
@@ -15,7 +17,7 @@ import app.timetable.mobile.R;
 /**
  * 4×2：下一节课倒计时 + 今天剩下的课。
  *
- * 「今天剩下的课」是 Web 层算好传过来的 —— 这里只负责摆位置。
+ * 「今天剩下的课」是 Web 层算好传过来的 —— 这里只负责**按当前时间挑**与摆位置。
  * 之所以不在原生侧算，是因为"今天还剩哪些课"要经过作息方案、调课、停课、
  * 单双周一整套逻辑，在原生里再实现一遍必然会和主应用对不上。
  *
@@ -38,6 +40,8 @@ public class TimetableWidgetProvider extends AppWidgetProvider {
                 try { mgr.updateAppWidget(id, fallback(ctx)); } catch (Exception ignored) { }
             }
         }
+        /* 下课 / 上课 / 跨天时自己重画一次（见 WidgetRefresh） */
+        WidgetRefresh.scheduleNext(ctx, d);
     }
 
     static RemoteViews fallback(Context ctx) {
@@ -54,26 +58,32 @@ public class TimetableWidgetProvider extends AppWidgetProvider {
         v.setTextViewText(R.id.widget_term, d.term.length() > 0 ? d.term : "课表助手");
         v.setOnClickPendingIntent(R.id.widget_root, openApp(ctx, 1, ""));
 
-        boolean hasNext = d.next != null;
-        v.setViewVisibility(R.id.widget_next_row, hasNext ? View.VISIBLE : View.GONE);
-        if (hasNext) {
-            v.setTextViewText(R.id.widget_next_title, d.next.title);
-            v.setTextViewText(R.id.widget_next_where, d.next.subtitle());
-            long now = System.currentTimeMillis();
-            long target = d.next.startMs > now ? d.next.startMs : d.next.endMs;
+        long now = System.currentTimeMillis();
+        WidgetData.Item next = d.pickNext(now);
+        boolean fresh = d.isFresh(WidgetRender.todayIso());
+
+        v.setViewVisibility(R.id.widget_next_row, next != null ? View.VISIBLE : View.GONE);
+        if (next != null) {
+            v.setTextViewText(R.id.widget_next_title, next.title);
+            v.setTextViewText(R.id.widget_next_where, next.subtitle());
+            long target = next.startMs > now ? next.startMs : next.endMs;
             v.setChronometerCountDown(R.id.widget_next_count, true);
             v.setChronometer(R.id.widget_next_count, WidgetRender.chronometerBase(target), null, true);
-            /* 点"下一节课"那一行 → 直接进这门课的详情 */
-            v.setOnClickPendingIntent(R.id.widget_next_row, openApp(ctx, 10, d.next.courseId));
+            v.setOnClickPendingIntent(R.id.widget_next_row, openApp(ctx, 10, next.courseId));
         }
 
-        /* 今天剩下的课：有几行显示几行，多余的藏起来 */
-        int n = Math.min(d.today.size(), ROWS);
+        /*
+         * 行里放什么：
+         *   数据是今天的 → 今天还没结束的课（正常情况）；
+         *   数据过期了（几天没打开应用）→ 接下来的几节课，带上"周几"，别把旧课当今天。
+         */
+        List<WidgetData.Item> rows = fresh ? d.todayRemaining(now) : d.upcoming;
+        int n = Math.min(rows.size(), ROWS);
         for (int i = 0; i < ROWS; i++) {
             if (i < n) {
-                WidgetData.Item it = d.today.get(i);
+                WidgetData.Item it = rows.get(i);
                 v.setViewVisibility(rowBox(i + 1), View.VISIBLE);
-                v.setTextViewText(rowTime(i + 1), it.start);
+                v.setTextViewText(rowTime(i + 1), fresh ? it.start : it.dayLabel + ' ' + it.start);
                 v.setTextViewText(rowTitle(i + 1), it.title);
                 v.setTextViewText(rowWhere(i + 1),
                         it.location == null || it.location.length() == 0 ? it.period : it.location);
@@ -90,10 +100,10 @@ public class TimetableWidgetProvider extends AppWidgetProvider {
         if (empty) {
             v.setTextViewText(R.id.widget_hint,
                     WidgetStore.load(ctx) == null ? "打开应用同步一次"
-                            : (hasNext ? "今天没有其他课了" : "今天没有课"));
+                            : (fresh ? "今天没有课了" : "接下来没有课了"));
         }
 
-        int more = d.today.size() - n;
+        int more = rows.size() - n;
         v.setViewVisibility(R.id.widget_more, more > 0 ? View.VISIBLE : View.GONE);
         if (more > 0) v.setTextViewText(R.id.widget_more, "还有 " + more + " 节");
 

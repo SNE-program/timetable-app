@@ -110,19 +110,29 @@ function errorStatus(message: string): NotifierStatus {
 export async function syncReminders(
   data: TimetableData, prefs: ReminderPrefs
 ): Promise<ReminderSyncResult> {
+  let result: ReminderSyncResult;
   try {
-    return await withTimeout(syncRemindersInner(data, prefs), 30000, '提醒同步');
+    result = await withTimeout(syncRemindersInner(data, prefs), 30000, '提醒同步');
   } catch (e) {
     const msg = (e as Error) && (e as Error).message ? (e as Error).message : String(e);
     console.warn('提醒同步失败：', e);
     try {
       /* 兜底里的这次查询同样要有超时，否则兜底自己也会挂住 */
       const st = await withTimeout(getNotifier(handleFired).status(), 12000, '读取通知状态');
-      return { status: Object.assign({}, st, { lastError: msg }), upcoming: [], firedNow: [] };
+      result = { status: Object.assign({}, st, { lastError: msg }), upcoming: [], firedNow: [] };
     } catch (e2) {
-      return { status: errorStatus(msg), upcoming: [], firedNow: [] };
+      result = { status: errorStatus(msg), upcoming: [], firedNow: [] };
     }
   }
+  /*
+   * 桌面小组件的数据推送放在**最后且一定会走**的位置。
+   *
+   * 以前它在 syncRemindersInner 的末尾，而前面任何一步抛异常（例如读通知状态失败）
+   * 都会跳到 catch —— 小组件于是永远停在"打开应用同步一次"。
+   * 提醒通道出问题不该连累桌面显示。
+   */
+  await pushWidgetData(data).catch(function () { /* 忽略 */ });
+  return result;
 }
 
 async function syncRemindersInner(
@@ -164,14 +174,6 @@ async function syncRemindersInner(
     console.warn('排程失败：', e);
   }
   const status = await notifier.status();
-
-  /*
-   * 顺手把桌面小组件的数据推过去。放在这里而不是单独开一个副作用，是因为
-   * 小组件要显示的内容（下一节课、今天剩下的课）和排程用的是同一份展开结果 ——
-   * 分两处算迟早会出现"提醒已经改了、小组件还显示旧的"。
-   * 推送失败不影响排程，pushWidgetData 内部已经把异常吞掉了。
-   */
-  await pushWidgetData(data).catch(function () { /* 忽略 */ });
 
   return { status: status, upcoming: upcoming.map(toItem), firedNow: firedNow };
 }

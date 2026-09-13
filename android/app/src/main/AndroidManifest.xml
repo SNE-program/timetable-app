@@ -26,8 +26,10 @@
 
         <!--
           桌面小组件。
-          updatePeriodMillis 在 widget info 里设为 0：数据完全由应用推送刷新，
-          不靠系统定时唤醒 —— 倒计时用 Chronometer 在桌面自己走，不需要我们每分钟更。
+          updatePeriodMillis 在 widget info 里设为 0：数据由应用推送 + **到点自刷新**，
+          不靠系统每 30 分钟叫醒一次 —— 倒计时用 Chronometer 在桌面自己走。
+          到点自刷新走下面的 WidgetRefreshReceiver：下一节开始 / 这节下课 / 跨天零点，
+          由 WidgetRefresh 排一个精确闹钟（没被授权时退回不精确的）。
 
           android:exported="false"：只有系统桌面能通过 AppWidget 机制唤起它，
           不需要对外暴露。 （APPWIDGET_UPDATE 由系统广播，非 exported 也能收到）
@@ -53,6 +55,15 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/widget_next_info" />
         </receiver>
+
+        <!--
+          到点把小组件重画一次。
+          没有这个接收器，"上完一节之后桌面还显示着那一节"就只能等用户再打开应用 ——
+          exported=false 足够：闹钟是我们自己排的显式 Intent。
+        -->
+        <receiver
+            android:name=".widget.WidgetRefreshReceiver"
+            android:exported="false" />
 
         <!--
           系统时间 / 时区变化、应用更新：只记一个"待重排"标记，真正的重排在

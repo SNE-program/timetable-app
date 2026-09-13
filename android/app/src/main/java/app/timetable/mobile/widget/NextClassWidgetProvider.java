@@ -18,6 +18,10 @@ import app.timetable.mobile.R;
  * 倒计时用 RemoteViews 里的 Chronometer，它在**桌面进程里自己走**，
  * 不需要我们每分钟去刷新一次 —— 用广播推动的倒计时既费电又会被系统限流，
  * 到时候秒数卡住不动才是最尴尬的。
+ *
+ * "下一节"是**每次渲染时按当前时间现挑的**（`pickNext`），不是推送时定死的：
+ * 于是两次推送之间，桌面自己就能从"距上课"翻到"正在上课"，再翻到下一节。
+ * 到点由 {@link WidgetRefresh#scheduleNext} 排的闹钟把这次渲染叫醒。
  */
 public class NextClassWidgetProvider extends AppWidgetProvider {
 
@@ -32,6 +36,8 @@ public class NextClassWidgetProvider extends AppWidgetProvider {
                 try { mgr.updateAppWidget(id, fallback(ctx)); } catch (Exception ignored) { }
             }
         }
+        /* 渲染完把下一次"自己重画"排上 —— 桌面不靠应用在前台也能翻页 */
+        WidgetRefresh.scheduleNext(ctx, d);
     }
 
     /** 出错时至少显示一句人话 */
@@ -49,26 +55,27 @@ public class NextClassWidgetProvider extends AppWidgetProvider {
         RemoteViews v = new RemoteViews(ctx.getPackageName(), R.layout.widget_next);
         v.setTextViewText(R.id.widget_term, d.term.length() > 0 ? d.term : "课表助手");
 
-        if (d.next == null) {
+        long now = System.currentTimeMillis();
+        WidgetData.Item nx = d.pickNext(now);
+        if (nx == null) {
             v.setViewVisibility(R.id.widget_body, View.GONE);
             v.setViewVisibility(R.id.widget_empty, View.VISIBLE);
             v.setTextViewText(R.id.widget_empty,
-                    WidgetStore.load(ctx) == null ? "打开应用同步一次" : "今天没有课了");
+                    WidgetStore.load(ctx) == null ? "打开应用同步一次" : "接下来没有课了");
         } else {
             v.setViewVisibility(R.id.widget_empty, View.GONE);
             v.setViewVisibility(R.id.widget_body, View.VISIBLE);
-            v.setTextViewText(R.id.widget_course, d.next.title);
-            v.setTextViewText(R.id.widget_where, d.next.subtitle());
+            v.setTextViewText(R.id.widget_course, nx.title);
+            v.setTextViewText(R.id.widget_where, nx.subtitle());
 
-            long now = System.currentTimeMillis();
             /* 还没开始就倒计时到上课；已经开始了就倒计时到下课，比显示负数有用 */
-            long target = d.next.startMs > now ? d.next.startMs : d.next.endMs;
+            long target = nx.startMs > now ? nx.startMs : nx.endMs;
             v.setChronometerCountDown(R.id.widget_count, true);
             v.setChronometer(R.id.widget_count, WidgetRender.chronometerBase(target), null, true);
         }
 
         /* 点卡片直接进这节课的详情，而不是只把应用拉到前台（计划书 6.5 节的要求） */
-        v.setOnClickPendingIntent(R.id.widget_root, openApp(ctx, 0, d.next == null ? "" : d.next.courseId));
+        v.setOnClickPendingIntent(R.id.widget_root, openApp(ctx, 0, nx == null ? "" : nx.courseId));
         return v;
     }
 
