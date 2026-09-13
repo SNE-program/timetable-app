@@ -1,7 +1,9 @@
 import React from 'react';
 import { deleteOverride, markAttendance, openAdd, openCourse, useApp } from '../app/store';
 import type { AttendanceStatus } from '../core/types';
-import { conflictsOf, expandDay, freeSlots, nextEvent, parseISODate, todayISO } from '../core/engine';
+import {
+  conflictsOf, expandDay, freeSlots, nextEvent, parseISODate, todayISO, weekLimitOf, weekMatches, weekOfDate,
+} from '../core/engine';
 import { courseColor, resolvePalette } from '../theme/palette';
 import { resolveDark } from '../theme/tokens';
 import { useCourseMap, useMinuteClock } from './useMinuteClock';
@@ -26,6 +28,32 @@ export default function TodayView() {
   const conflicts = React.useMemo(function () { return conflictsOf(data, today); }, [data, today]);
   const slots = React.useMemo(function () { return freeSlots(data, today); }, [data, today]);
   const palette = React.useMemo(function () { return resolvePalette(theme, s.systemDark); }, [theme, s.systemDark]);
+
+  /*
+   * 今天被停掉的课。
+   *
+   * 引擎会把停课的那一节直接从当天里去掉（这是对的：它今天不上），
+   * 但"停错了想改回来"恰恰只能从这里看到 —— 否则用户得回到周视图、找到那门课、
+   * 再打开调整面板才够得着。所以这里单独列一份，并就地给「恢复」。
+   */
+  const cancelledToday = React.useMemo(function () {
+    const out: { id: string; sessionId: string; title: string; periodStart: number; periodEnd: number; reason: string }[] = [];
+    const byId = new Map(data.sessions.map(function (x) { return [x.id, x] as [string, typeof x]; }));
+    const limit = weekLimitOf(data.term);
+    (data.overrides || []).forEach(function (o) {
+      if (o.action !== 'cancel' || o.date !== today) return;
+      const sess = byId.get(o.sessionId);
+      if (!sess) return;
+      /* 这一周本来就该有这节课，才算"今天被停掉"（否则是别周记录串进来了） */
+      if (!weekMatches(sess.weeks, weekOfDate(data.term, o.date), limit)) return;
+      const c = courseById.get(sess.courseId);
+      out.push({
+        id: o.id, sessionId: sess.id, title: c ? c.name : '未命名课程',
+        periodStart: sess.periodStart, periodEnd: sess.periodEnd, reason: o.reason || '',
+      });
+    });
+    return out;
+  }, [data, today, courseById]);
 
   /* 只有这个真的依赖"现在几点" */
   const next = React.useMemo(function () { return nextEvent(data, now); }, [data, now]);
@@ -211,6 +239,27 @@ export default function TodayView() {
           })}
         </div>
       )}
+
+      {/* 今天被停掉的课：列在时间线下面，就地给「恢复」 */}
+      {cancelledToday.length > 0 ? (
+        <React.Fragment>
+          <div className="section-title">今天被停课的 · {cancelledToday.length} 节</div>
+          <div className="card-block">
+            {cancelledToday.map(function (x) {
+              return (
+                <div className="list-row" key={x.id}>
+                  <div>
+                    <div className="lr-label">{x.title} · 第 {x.periodStart}-{x.periodEnd} 节</div>
+                    <div className="lr-sub">{x.reason || '未填原因'} · 点「恢复」今天就照原样上</div>
+                  </div>
+                  <div className="spacer" />
+                  <button className="btn sm" onClick={function () { deleteOverride(x.id); }}>恢复</button>
+                </div>
+              );
+            })}
+          </div>
+        </React.Fragment>
+      ) : null}
     </div>
   );
 }

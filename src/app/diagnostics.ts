@@ -9,9 +9,10 @@
  *       ?diag=1&w=360,390  在 360 / 390 宽的 iframe 里分别测
  */
 import {
-  getState, historyEntries, openHistory, openOverride, patchTheme, storeEmitCount, toggleTask, undoTo, upsertOverride,
+  getState, historyEntries, openHistory, openOverride, patchTheme, setData, setTab, storeEmitCount, toggleTask, undoTo,
+  upsertOverride,
 } from './store';
-import { todayISO } from '../core/engine';
+import { dayOfWeekOf, parseISODate, todayISO, weekLimitOf, weekMatches, weekOfDate } from '../core/engine';
 import { renderCounts } from './renderCount';
 import { UPCOMING_MAX, buildWidgetPayload, widgetBoundaryMs } from '../platform/widget';
 import { renderTimetableImage } from '../ui/timetableImage';
@@ -558,9 +559,13 @@ function runHistoryCheck(count: number): void {
 /**
  * 「调整某一次课」面板 + 恢复按钮的自检（?ovcheck=1）。
  *
- * 这一版把"已调整的 N 次"挪到了面板最上面、按钮改成「恢复」。这两件事都只能用真数据量：
- * 先按公开接口做一次停课，再打开面板，量标题与按钮的尺寸，然后**真的点一下「恢复」**，
- * 看数据里那条调整是否消失、历史栈是否多了一笔可撤销的记录。
+ * 这一版把"已调整的 N 次"挪到了面板最上面、按钮改成「恢复」，今日页上被停掉的那一节
+ * 也要能就地恢复。这几件事只能用真数据量：
+ *
+ *   1. 按公开接口做一次停课 → 打开调整面板 → 量首行标题与「恢复」按钮 → **真的点一下** →
+ *      看调整记录是否消失、历史栈是否多了一笔可撤销的记录；
+ *   2. 挑一节"今天本来就该上"的课停掉 → 切到今日页 → 看「今天被停课的」那一块有没有出现、
+ *      点它的「恢复」之后这节课是否回到今天的安排里。
  */
 function runOverrideCheck(): void {
   let send = function (_text: string): void { /* 默认不回传 */ };
@@ -594,9 +599,78 @@ function runOverrideCheck(): void {
         send('OVCHECK 点「恢复」之后 overrides=' + now.data.overrides.length
           + '，历史 ' + undoBefore + ' -> ' + now.history.undo
           + '（多了一笔=' + (now.history.undo > undoBefore ? 'yes' : 'no') + '）');
+        runTodayCancelCheck(send);
       }, 500);
     }, 800);
   }, 1200);
+}
+
+/**
+ * 第二阶段：把"今天本来就该上"的一节课停掉，切到今日页，验证「今天被停课的」那一块。
+ *
+ * 为什么挑"今天本来就该上"的：引擎会按周次判断这节课今天是否真的存在，
+ * 随便挑一节停掉的话，它可能本来就不在今天 —— 那就验不到这条路径。
+ */
+function runTodayCancelCheck(send: (text: string) => void): void {
+  const st = getState();
+  const today = todayISO();
+  const dow = dayOfWeekOf(parseISODate(today));
+  const limit = weekLimitOf(st.data.term);
+  const wk = weekOfDate(st.data.term, today);
+  let sess = st.data.sessions.filter(function (x) {
+    return x.dayOfWeek === dow && weekMatches(x.weeks, wk, limit);
+  })[0];
+  /*
+   * 今天本来没课（周末、或者不在学期内）时，临时造一节出来。
+   *
+   * 不这么做的话，一周里有五天这个自检都是"跳过"，等于没验 —— 而它验的正是
+   * "停错了能不能从今日页直接恢复"。临时课在检查结束后**立刻删掉**（连同它的调整记录），
+   * 数据回到原样；这份自检只在 ?ovcheck=1 时才会跑。
+   */
+  let tempId = '';
+  if (!sess) {
+    const baseSess = st.data.sessions[0];
+    if (!baseSess) { send('OVCHECK 今日页：没有任何课可以做样本，跳过'); return; }
+    tempId = 'selfcheck-' + Date.now();
+    sess = Object.assign({}, baseSess, {
+      id: tempId,
+      dayOfWeek: dow,
+      weeks: { type: 'range', from: wk, to: wk },
+    });
+    setData(Object.assign({}, st.data, { sessions: st.data.sessions.concat([sess]) }), '自检：临时加一节');
+    send('OVCHECK 今日页：今天本来没有课，临时加了一节来验（跑完会删掉）');
+  }
+  const before = getState().data.overrides.length;
+  upsertOverride({ sessionId: sess.id, date: today, action: 'cancel', reason: '自检停课' });
+  setTab('today');
+  setTimeout(function () {
+    /* 找到那一块里属于自检的那一行（按原因文字定位，别靠顺序） */
+    const rows = Array.prototype.slice.call(document.querySelectorAll('.list-row')) as HTMLElement[];
+    let mine: HTMLElement | null = null;
+    for (const el of rows) if ((el.textContent || '').indexOf('自检停课') >= 0) mine = el;
+    if (!mine) { send('OVCHECK 今日页：没找到「今天被停课的」那一行'); return; }
+    let btn: HTMLButtonElement | null = null;
+    const bs = mine.querySelectorAll('button');
+    for (let i = 0; i < bs.length; i++) if ((bs[i].textContent || '').trim() === '恢复') btn = bs[i] as HTMLButtonElement;
+    const r = btn ? btn.getBoundingClientRect() : null;
+    send('OVCHECK 今日页 w=' + window.innerWidth + ' 行文本="' + (mine.textContent || '').slice(0, 26) + '"'
+      + ' 恢复按钮=' + (r ? Math.round(r.width) + 'x' + Math.round(r.height) : '没有'));
+    if (btn) btn.click();
+    setTimeout(function () {
+      const now = getState();
+      const stillThere = Array.prototype.slice.call(document.querySelectorAll('.list-row'))
+        .filter(function (el) { return ((el as HTMLElement).textContent || '').indexOf('自检停课') >= 0; }).length;
+      send('OVCHECK 今日页点「恢复」之后 overrides=' + now.data.overrides.length + '/' + before
+        + '，那一行还在=' + (stillThere > 0 ? 'yes' : 'no'));
+      if (tempId) {
+        setData(Object.assign({}, now.data, {
+          sessions: now.data.sessions.filter(function (x) { return x.id !== tempId; }),
+          overrides: now.data.overrides.filter(function (o) { return o.sessionId !== tempId; }),
+        }), '自检：删掉临时课');
+        send('OVCHECK 今日页：临时课已删除，现在 sessions=' + getState().data.sessions.length);
+      }
+    }, 500);
+  }, 900);
 }
 
 export function runDiagnostics(): void {

@@ -221,9 +221,17 @@ input[type="range"].rng::-moz-range-thumb { width: 12px; height: 12px; border-ra
   animation: sheetUp 200ms var(--ease);
 }
 .toast { display: flex; align-items: center; gap: 12px; justify-content: center; }
+/*
+ * 提示条上的「撤销」。
+ *
+ * 它原来是 3px/10px 内边距 —— 量出来只有 42×23，比应用里最小的一档按钮还小。
+ * 而这个按钮恰恰出现在"刚做错一件事、最需要赶紧点"的时候，太小就是逼人点第二下。
+ * 现在对齐应用里的小按钮规格（约 46×32），宽度也过了触控目标的检查。
+ */
 .toast-undo {
-  flex: 0 0 auto; white-space: nowrap; padding: 3px 10px; border-radius: var(--r-tag);
-  background: rgba(255,255,255,.18); color: inherit; font-weight: 700; font-size: var(--fs-xs);
+  flex: 0 0 auto; white-space: nowrap; display: inline-flex; align-items: center;
+  min-height: 32px; padding: 0 14px; border-radius: var(--r-btn);
+  background: rgba(255,255,255,.18); color: inherit; font-weight: 700; font-size: var(--fs-sm);
 }
 .toast-undo:active { opacity: .7; }
 .toast.warn { background: #B4690E; color: #FFF7E8; }
