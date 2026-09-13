@@ -1,0 +1,52 @@
+{
+  "format": "timetable-plugin",
+  "version": 1,
+  "apiVersion": 3,
+  "id": "example.ddl-rule",
+  "name": "作业与课前提醒（示例）",
+  "author": "示例",
+  "pluginVersion": "1.0.0",
+  "description": "两条提醒规则：作业截止前两小时提醒一次；每天早上七点半告诉你今天有几节课、第一节是什么。通知由应用发出，文案里的信息全部来自你自己的课表。",
+  "permissions": ["notify"],
+  "capabilities": [
+    {
+      "type": "rule",
+      "id": "ddl-2h",
+      "name": "作业截止前两小时",
+      "hint": "只提醒没做完的作业",
+      "when": { "event": "task.dueSoon", "minutes": 120 },
+      "then": {
+        "notify": {
+          "title": "还有两小时：{task.title}",
+          "body": "{task.course} · 今天 {task.due} 截止"
+        }
+      }
+    },
+    {
+      "type": "rule",
+      "id": "morning",
+      "name": "每天早上报今天的课",
+      "hint": "今天没课时不打扰",
+      "when": { "event": "daily.at", "at": "07:30" },
+      "then": {
+        "notify": {
+          "title": "今天 {today.count} 节课",
+          "body": "第一节 {today.first} · 第 {week} 周"
+        }
+      }
+    },
+    {
+      "type": "rule",
+      "id": "class-30",
+      "name": "每节课前半小时",
+      "hint": "比应用自带的提醒更早一点",
+      "when": { "event": "class.before", "minutes": 30 },
+      "then": {
+        "notify": {
+          "title": "{course.name} 半小时后开始",
+          "body": "{class.start}-{class.end} · {course.room}"
+        }
+      }
+    }
+  ]
+}

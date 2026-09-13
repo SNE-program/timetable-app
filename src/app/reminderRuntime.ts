@@ -1,6 +1,8 @@
 import { DEFAULT_PREFS, planNotifications, missedNotifications, type PlannedNotification, type ReminderPrefs } from '../core/reminders';
 import type { TimetableData } from '../core/types';
 import { getNotifier } from '../platform';
+import { activeRules } from '../plugins/host';
+import { planRuleNotificationsLimited } from '../plugins/rules';
 import { pushWidgetData } from '../platform/widget';
 import { withTimeout } from '../platform/timeout';
 import type { NotifierStatus, NotifyItem } from '../platform/types';
@@ -74,6 +76,14 @@ const CHANNEL_OF: Record<string, string> = {
   class: 'class-reminder',
   brief: 'daily-brief',
   task: 'ddl',
+  /*
+   * 插件规则单开一个渠道（v1.9.15）。
+   *
+   * 这一条是有意的：不想被插件打扰的人可以**只关这一个渠道**，
+   * 上课提醒与作业提醒不受影响。让"关掉插件通知"和"关掉全部通知"分开，
+   * 是插件功能能被长期接受的前提。
+   */
+  rule: 'plugin-rule',
 };
 
 function toItem(n: PlannedNotification): NotifyItem {
@@ -140,11 +150,18 @@ async function syncRemindersInner(
 ): Promise<ReminderSyncResult> {
   const notifier = getNotifier(handleFired);
   const now = Date.now();
-  const all = planNotifications(
-    data, prefs,
-    now - MISS_WINDOW_MINUTES * 60000,
-    now + HORIZON_DAYS * 86400000
-  );
+  const from = now - MISS_WINDOW_MINUTES * 60000;
+  const to = now + HORIZON_DAYS * 86400000;
+  const all = planNotifications(data, prefs, from, to);
+  /*
+   * 插件规则**并进同一份排程**，而不是另走一条发送路径。
+   *
+   * 于是三件难做对的事全部复用：去重（fingerprint + 已发送日志）、
+   * 错过补偿（启动时回扫 15 分钟）、滚动排程（只排未来 7 天，Android 对闹钟有数量限制）。
+   * 另一条路径意味着另一套去重与补发逻辑，而那正是"偶尔收到两条一样的提醒"的来源。
+   */
+  for (const n of planRuleNotificationsLimited(activeRules(), data, from, to)) all.push(n);
+  all.sort(function (a, b) { return a.at - b.at; });
   const log = loadFiredLog();
   const missed = missedNotifications(all, log, new Date(now), MISS_WINDOW_MINUTES);
   const upcoming = all.filter(function (n) { return n.at > now; });

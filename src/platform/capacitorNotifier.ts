@@ -14,6 +14,12 @@ export const CHANNELS = [
   { id: 'ddl', name: '作业与截止', description: '作业、DDL 到期提醒', importance: 4, vibration: true },
   { id: 'daily-brief', name: '明日课表', description: '每天晚上推送第二天的课', importance: 3, vibration: false },
   { id: 'silent-info', name: '其他提示', description: '低频信息，不打扰', importance: 2, vibration: false },
+  /*
+   * 插件规则的通知（v1.9.15）。**单独一个渠道**是有意的：
+   * 用户可以在系统设置里只关掉它，上课提醒与作业提醒不受影响 ——
+   * "不想被插件打扰"和"不想被应用打扰"必须是两件事。
+   */
+  { id: 'plugin-rule', name: '插件提醒', description: '插件按你设定的规则发出的提醒', importance: 3, vibration: true },
 ];
 
 const PLUGIN = 'LocalNotifications';

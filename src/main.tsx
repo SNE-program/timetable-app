@@ -35,6 +35,7 @@ if (typeof window !== 'undefined'
     || window.location.search.indexOf('wp=1') >= 0
     || window.location.search.indexOf('plugcheck') >= 0
     || window.location.search.indexOf('importcheck') >= 0
+    || window.location.search.indexOf('rulecheck') >= 0
     || window.location.search.indexOf('expand=1') >= 0)) {
   runDiagnostics();
 }

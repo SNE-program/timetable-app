@@ -1,8 +1,10 @@
 import {
-  CAPABILITY_PERMISSION, type Capability, type CommandCapability, type ExportCapability,
-  type ImportCapability, type InstalledPlugin, type PluginManifest, type PluginPermission,
-  type SettingField, type SettingsCapability,
+  CAPABILITY_PERMISSION, RULE_BODY_MAX, RULE_PLACEHOLDERS, RULE_TITLE_MAX, type Capability,
+  type CommandCapability, type ExportCapability, type ImportCapability, type InstalledPlugin,
+  type PluginManifest, type PluginPermission, type RuleCapability, type SettingField,
+  type SettingsCapability,
 } from './types';
+import { RULE_MAX_PER_PLUGIN, RULE_MAX_MINUTES, RULE_MIN_MINUTES, type ActiveRule } from './rules';
 import type { FieldKey as ImportFieldKey } from '../core/courseImport';
 import { clearAllSettings, maxFields, maxOptions, maxTextLength, readSettings, resetSettings } from './settings';
 import { COLUMN_LABEL, SCOPE_COLUMNS, type ExportColumn, type ExportFormat, type ExportScope } from '../core/exporters';
@@ -139,7 +141,7 @@ export function validateManifest(raw: unknown): ParseResult {
 
   const perms = Array.isArray(m.permissions) ? m.permissions : [];
   for (const p of perms) {
-    if (p !== 'read:timetable') return { ok: false, error: '不认识的权限：' + String(p) };
+    if (p !== 'read:timetable' && p !== 'notify') return { ok: false, error: '不认识的权限：' + String(p) };
   }
 
   const caps = Array.isArray(m.capabilities) ? m.capabilities : [];
@@ -147,12 +149,15 @@ export function validateManifest(raw: unknown): ParseResult {
   if (caps.length > 8) return { ok: false, error: '一个插件的能数量上限是 8 个' };
   /* 设置项要按 key 被导出能力引用，所以得跨能力收集 */
   const settingFields: Record<string, SettingField> = {};
+  /* 规则条数单独计数：它决定"每小时最多被叫几次"，上限比别处更该管住 */
+  let ruleCount = 0;
 
   const seen = new Set<string>();
   const outCaps: Capability[] = [];
   for (const c of caps) {
     const cap = c as Record<string, unknown>;
-    if (cap.type !== 'export' && cap.type !== 'command' && cap.type !== 'settings' && cap.type !== 'import') {
+    if (cap.type !== 'export' && cap.type !== 'command' && cap.type !== 'settings'
+      && cap.type !== 'import' && cap.type !== 'rule') {
       return { ok: false, error: '不支持的能力类型：' + String(cap.type) };
     }
     if (typeof cap.id !== 'string' || !cap.id) return { ok: false, error: '能力缺少 id' };
@@ -185,6 +190,74 @@ export function validateManifest(raw: unknown): ParseResult {
         hint: typeof cap.hint === 'string' ? cap.hint : undefined,
         action: { kind: 'export', capabilityId: act.capabilityId },
         keys: keys.length > 0 ? (keys as string[]) : undefined,
+      });
+      continue;
+    }
+
+    /* ---------------- 提醒规则：宿主发通知，插件只挑事件与文案模板 ---------------- */
+    if (cap.type === 'rule') {
+      const when = cap.when as Record<string, unknown> | undefined;
+      if (!when || typeof when !== 'object') return { ok: false, error: '规则 ' + cap.id + ' 缺少 when' };
+      const ev = when.event;
+      if (ev !== 'task.dueSoon' && ev !== 'class.before' && ev !== 'daily.at') {
+        return { ok: false, error: '规则 ' + cap.id + ' 的事件只能是 task.dueSoon / class.before / daily.at' };
+      }
+      let minutes: number | undefined;
+      if (ev === 'daily.at') {
+        const at = when.at;
+        if (typeof at !== 'string' || !/^([01]?\d|2[0-3]):[0-5]\d$/.test(at)) {
+          return { ok: false, error: '规则 ' + cap.id + ' 的 when.at 要写成 "07:30" 这样' };
+        }
+      } else {
+        if (typeof when.minutes !== 'number' || !isFinite(when.minutes)) {
+          return { ok: false, error: '规则 ' + cap.id + ' 需要 when.minutes（提前多少分钟）' };
+        }
+        const mins = Math.round(when.minutes);
+        if (mins < RULE_MIN_MINUTES || mins > RULE_MAX_MINUTES) {
+          return { ok: false, error: '规则 ' + cap.id + ' 的提前量要在 ' + RULE_MIN_MINUTES + ' 分钟到 7 天之间' };
+        }
+        minutes = mins;
+      }
+
+      const then = cap.then as Record<string, unknown> | undefined;
+      const notify = then && typeof then === 'object' ? (then.notify as Record<string, unknown> | undefined) : undefined;
+      if (!notify || typeof notify !== 'object') return { ok: false, error: '规则 ' + cap.id + ' 缺少 then.notify' };
+      const title = typeof notify.title === 'string' ? notify.title.trim() : '';
+      const body = typeof notify.body === 'string' ? notify.body.trim() : '';
+      if (!title) return { ok: false, error: '规则 ' + cap.id + ' 的标题不能为空' };
+      if (title.length > RULE_TITLE_MAX) return { ok: false, error: '规则 ' + cap.id + ' 的标题超过 ' + RULE_TITLE_MAX + ' 个字' };
+      if (body.length > RULE_BODY_MAX) return { ok: false, error: '规则 ' + cap.id + ' 的正文超过 ' + RULE_BODY_MAX + ' 个字' };
+
+      /*
+       * ★ 占位符白名单。
+       *
+       * 这是通知这条路上**唯一一处"插件写的字会被用户读到"**的地方，所以校验在这里做完：
+       * 白名单之外的一律拒，而不是运行时悄悄抹掉 —— 作者写错时应该当场知道，
+       * 而不是发布之后收到一条缺了一块的提醒。
+       */
+      const tokens = (title + ' ' + body).match(/\{[a-z0-9._]+\}/gi) || [];
+      for (const tk of tokens) {
+        if (!RULE_PLACEHOLDERS[tk]) {
+          return {
+            ok: false,
+            error: '规则 ' + cap.id + ' 里的占位符 ' + tk + ' 不在允许列表内（可用：' + Object.keys(RULE_PLACEHOLDERS).join(' ') + '）',
+          };
+        }
+      }
+      if (perms.indexOf(CAPABILITY_PERMISSION.rule as PluginPermission) < 0) {
+        return { ok: false, error: '规则 ' + cap.id + ' 需要声明权限 "' + CAPABILITY_PERMISSION.rule + '"' };
+      }
+      ruleCount++;
+      if (ruleCount > RULE_MAX_PER_PLUGIN) {
+        return { ok: false, error: '一个插件最多 ' + RULE_MAX_PER_PLUGIN + ' 条提醒规则' };
+      }
+      outCaps.push({
+        type: 'rule',
+        id: cap.id,
+        name: cap.name,
+        hint: typeof cap.hint === 'string' ? cap.hint.slice(0, 60) : undefined,
+        when: { event: ev, minutes: minutes, at: typeof when.at === 'string' ? when.at : undefined },
+        then: { notify: { title: title, body: body } },
       });
       continue;
     }
@@ -588,6 +661,27 @@ export interface ActiveImport {
   pluginId: string;
   pluginName: string;
   capability: ImportCapability;
+}
+
+/**
+ * 汇总已启用插件的**提醒规则**。
+ *
+ * 每插件最多 `RULE_MAX_PER_PLUGIN` 条，超出的按声明顺序丢掉 ——
+ * 安装时也会直接拒，这里是防"清单是从 localStorage 里被改过的"。
+ */
+export function activeRules(): ActiveRule[] {
+  const out: ActiveRule[] = [];
+  for (const p of listPlugins()) {
+    if (!isPluginActive(p)) continue;
+    let n = 0;
+    for (const c of p.manifest.capabilities) {
+      if (c.type !== 'rule') continue;
+      if (n >= RULE_MAX_PER_PLUGIN) break;
+      n++;
+      out.push({ pluginId: p.manifest.id, pluginName: p.manifest.name, capability: c });
+    }
+  }
+  return out;
 }
 
 /** 汇总已启用插件的导入预设（导入弹层里的"这是哪个学校的表"那一排） */

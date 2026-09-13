@@ -10,7 +10,7 @@ import EXAMPLE_IMPORT from '../../examples/plugin-jwc-import.tbplugin.json?raw';
 import {
   HOST_API_VERSION, activeCommands, activeExports, activeImports, grantPermissions, installPlugin,
   isPluginActive, lastLoadIssues, listPlugins, parseManifest, resetPlugins, resolveExportColumns,
-  resolveExportFileName, setPluginEnabled, settingsCapability, uninstallPlugin,
+  resolveExportFileName, setPluginEnabled, settingsCapability, uninstallPlugin, activeRules,
 } from './host';
 import { writeSetting } from './settings';
 
@@ -608,6 +608,71 @@ describe('导入预设', function () {
 
   it('检查用的内置预设只在 ?devplugin=import 时出现（生产不受影响）', function () {
     expect(activeImports().some(function (x) { return x.pluginId === 'dev.import-preset'; })).toBe(false);
+  });
+});
+
+describe('提醒规则', function () {
+  function rulePkg(cap: Record<string, unknown>, perms?: string[]): string {
+    return pkg({
+      permissions: perms || ['notify'],
+      capabilities: [Object.assign({ type: 'rule', id: 'r1', name: '规则' }, cap)],
+    });
+  }
+  const OK_WHEN = { event: 'task.dueSoon', minutes: 120 };
+  const OK_THEN = { notify: { title: '还有 {minutes} 分钟', body: '{task.title}' } };
+
+  it('合法规则能装上，撤掉权限后立刻不生效', function () {
+    const text = rulePkg({ when: OK_WHEN, then: OK_THEN });
+    expect(parseManifest(text).ok).toBe(true);
+    expect(installPlugin(text, ['notify']).ok).toBe(true);
+    expect(activeRules().some(function (r) { return r.pluginId === 'test.hello'; })).toBe(true);
+    grantPermissions('test.hello', []);
+    expect(activeRules().some(function (r) { return r.pluginId === 'test.hello'; })).toBe(false);
+  });
+
+  it('★ 规则必须声明 notify 权限 —— 通知是唯一会主动打扰用户的能力', function () {
+    const r = parseManifest(rulePkg({ when: OK_WHEN, then: OK_THEN }, ['read:timetable']));
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.error).toContain('notify');
+  });
+
+  it('★ 占位符白名单：不认识的会被拒，而不是发出去', function () {
+    const bad = parseManifest(rulePkg({ when: OK_WHEN, then: { notify: { title: 'x', body: '{user.email}' } } }));
+    expect(bad.ok).toBe(false);
+    if (bad.ok) return;
+    expect(bad.error).toContain('占位符');
+    expect(parseManifest(rulePkg({ when: OK_WHEN, then: { notify: { title: '{token}', body: 'x' } } })).ok).toBe(false);
+  });
+
+  it('事件与参数要对得上', function () {
+    expect(parseManifest(rulePkg({ when: { event: 'nope', minutes: 10 }, then: OK_THEN })).ok).toBe(false);
+    expect(parseManifest(rulePkg({ when: { event: 'task.dueSoon' }, then: OK_THEN })).ok).toBe(false);
+    expect(parseManifest(rulePkg({ when: { event: 'task.dueSoon', minutes: 0 }, then: OK_THEN })).ok).toBe(false);
+    expect(parseManifest(rulePkg({ when: { event: 'task.dueSoon', minutes: 8 * 24 * 60 }, then: OK_THEN })).ok).toBe(false);
+    expect(parseManifest(rulePkg({ when: { event: 'class.before', minutes: 30 }, then: OK_THEN })).ok).toBe(true);
+    /* daily.at 要的是时刻，不是分钟 */
+    expect(parseManifest(rulePkg({ when: { event: 'daily.at', at: '7:30' }, then: OK_THEN })).ok).toBe(true);
+    expect(parseManifest(rulePkg({ when: { event: 'daily.at', at: '25:00' }, then: OK_THEN })).ok).toBe(false);
+    expect(parseManifest(rulePkg({ when: { event: 'daily.at', minutes: 30 }, then: OK_THEN })).ok).toBe(false);
+  });
+
+  it('标题正文的长度与存在性都要管', function () {
+    expect(parseManifest(rulePkg({ when: OK_WHEN, then: { notify: { title: '', body: 'x' } } })).ok).toBe(false);
+    expect(parseManifest(rulePkg({ when: OK_WHEN, then: { notify: { title: '标'.repeat(41), body: 'x' } } })).ok).toBe(false);
+    expect(parseManifest(rulePkg({ when: OK_WHEN, then: { notify: { title: 'x', body: '文'.repeat(121) } } })).ok).toBe(false);
+    expect(parseManifest(rulePkg({ when: OK_WHEN })).ok).toBe(false);
+    expect(parseManifest(rulePkg({ then: OK_THEN })).ok).toBe(false);
+  });
+
+  it('一个插件的规则条数有上限', function () {
+    const many = pkg({
+      permissions: ['notify'],
+      capabilities: [1, 2, 3, 4, 5].map(function (i) {
+        return { type: 'rule', id: 'r' + i, name: '规则' + i, when: OK_WHEN, then: OK_THEN };
+      }),
+    });
+    expect(parseManifest(many).ok).toBe(false);
   });
 });
 

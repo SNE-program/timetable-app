@@ -33,7 +33,7 @@ import type { ExportColumn } from '../core/exporters';
  * 没有它，插件就只是导出菜单里的一行字 —— 用户根本感知不到装过什么。
  * 而它仍然是**零代码**的：命令只是把已有动作包一层，插件无法借它执行任何新逻辑。
  */
-export type CapabilityType = 'export' | 'command' | 'settings' | 'import';
+export type CapabilityType = 'export' | 'command' | 'settings' | 'import' | 'rule';
 
 export interface ExportCapability {
   type: 'export';
@@ -163,12 +163,93 @@ export interface ImportCapability {
   mode?: 'long' | 'matrix';
 }
 
-export type Capability = ExportCapability | CommandCapability | SettingsCapability | ImportCapability;
+/** 插件规则能监听的事件（**宿主实现，插件只能从中挑**） */
+export type RuleEvent =
+  /** 任务/DDL 到期前 N 分钟 */
+  | 'task.dueSoon'
+  /** 一节课开始前 N 分钟 */
+  | 'class.before'
+  /** 每天固定时刻 */
+  | 'daily.at';
 
-export type PluginPermission = 'read:timetable';
+/**
+ * 一条提醒规则。
+ *
+ * ## 为什么要"宿主实现事件、插件只挑"
+ *
+ * 这是 docs/14 那条不变量的样子：**新能力的实现必须先存在于宿主里，插件只是参数**。
+ * 通知相关的四件事全部由宿主做：
+ *
+ *   1. 事件从哪来（课表怎么展开、任务怎么算到期）—— 插件看不到数据，只挑事件名；
+ *   2. 文案怎么生成 —— 插件给的是**模板**，占位符必须来自白名单；
+ *   3. 什么时候发、发不发 —— 频率上限由宿主硬编码；
+ *   4. 谁来发 —— **只有宿主能发通知**，插件不能自己弹（那等于伪造应用通知）。
+ *
+ * 有意保留的限制：规则做不到"如果…就…"以外的任何逻辑。没有条件分支、没有表达式。
+ * 够用，而且没有一类失败是用户看不懂的。
+ */
+export interface RuleCapability {
+  type: 'rule';
+  /** 插件内唯一 */
+  id: string;
+  name: string;
+  hint?: string;
+  when: {
+    event: RuleEvent;
+    /** 提前多少分钟（`task.dueSoon` / `class.before`）：1 分钟到 7 天 */
+    minutes?: number;
+    /** `daily.at` 用的时刻，形如 "07:30" */
+    at?: string;
+  };
+  then: {
+    notify: {
+      /** 通知标题，可以带占位符 */
+      title: string;
+      /** 通知正文，可以带占位符 */
+      body: string;
+    };
+  };
+}
+
+export type Capability = ExportCapability | CommandCapability | SettingsCapability | ImportCapability | RuleCapability;
+
+/**
+ * 模板里允许出现的占位符。
+ *
+ * **这是权限以外的第二道闸**：模板由插件写、内容来自用户的数据，
+ * 白名单之外的一律在安装时拒绝 —— 于是"插件把课表内容拼进任意文本再发出去"这条路不存在。
+ * 通知是**应用发的**，用户看到的每一句话都得是应用能担保的。
+ */
+export const RULE_PLACEHOLDERS: Record<string, string> = {
+  '{task.title}': '任务标题',
+  '{task.due}': '任务截止（含时刻）',
+  '{task.course}': '任务关联的课程',
+  '{task.note}': '任务备注',
+  '{course.name}': '课程名',
+  '{course.room}': '教室',
+  '{course.teacher}': '教师',
+  '{class.start}': '上课时刻',
+  '{class.end}': '下课时刻',
+  '{today.count}': '今天几节课',
+  '{today.first}': '今天第一节课的课程名',
+  '{term.name}': '学期名',
+  '{week}': '当前周次',
+  '{minutes}': '规则里写的提前量（分钟）',
+};
+
+/** 一条规则通知的文案上限 —— 通知栏放不下更多，也不该被插件用来刷屏 */
+export const RULE_TITLE_MAX = 40;
+export const RULE_BODY_MAX = 120;
+
+export type PluginPermission = 'read:timetable' | 'notify';
 
 export const PERMISSION_LABEL: Record<PluginPermission, string> = {
   'read:timetable': '读取课表内容（课程、教师、教室、时间）',
+  /*
+   * 通知是**唯一会让应用主动打扰用户**的能力，所以说明里要写"打扰"这件事本身，
+   * 而不是"发送通知"这种听起来中性的说法 —— 用户据此决定勾不勾。
+   */
+  'notify': '按你设定的规则发出系统通知（文案由插件的模板生成，最多每小时 6 条）',
 };
 
 /**
@@ -187,6 +268,8 @@ export const CAPABILITY_PERMISSION: Partial<Record<CapabilityType, PluginPermiss
    * import 只提供表头写法，文件由用户选、解析与入库由宿主做、预览要用户确认、事后可撤销；
    * settings 只是插件自己的参数。理由见上面 ImportCapability 的说明。
    */
+  /* 规则会主动打扰用户 —— 这一条是真的有事，权限必须单独确认 */
+  rule: 'notify',
 };
 
 export interface PluginManifest {

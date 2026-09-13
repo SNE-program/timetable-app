@@ -135,6 +135,43 @@ const BUILTIN_PLUGINS: PluginManifest[] = [
 function devPlugin(): PluginManifest | null {
   let mode = '';
   try { mode = new URLSearchParams(window.location.search).get('devplugin') || ''; } catch (e) { return null; }
+  if (mode === 'rule') {
+    /*
+     * 检查用的**规则**插件（?devplugin=rule）。
+     *
+     * 规则没有界面可点（它是"到点自己发通知"），无头环境里也等不到它真的响。
+     * 所以给两条规则，让 `?rulecheck=1` 能把**真实数据**展开成排程项报出来：
+     * 一条任务规则、一条每天固定时刻的规则，两条都走宿主的白名单与频率上限。
+     */
+    return {
+      format: 'timetable-plugin',
+      version: 1,
+      apiVersion: 3,
+      id: 'dev.rule',
+      name: '检查用提醒规则',
+      author: '检查',
+      pluginVersion: '1.0.0',
+      description: '两条规则：作业提前两小时、每天早上七点半报今天的课。用来检查规则排程与频率上限。',
+      permissions: ['notify'],
+      capabilities: [
+        {
+          type: 'rule',
+          id: 'ddl-2h',
+          name: '作业提前两小时',
+          hint: '来自检查用插件',
+          when: { event: 'task.dueSoon', minutes: 120 },
+          then: { notify: { title: '还有两小时：{task.title}', body: '{task.course} · {task.due} 截止' } },
+        },
+        {
+          type: 'rule',
+          id: 'morning',
+          name: '早上报今天的课',
+          when: { event: 'daily.at', at: '07:30' },
+          then: { notify: { title: '今天 {today.count} 节课', body: '第一节 {today.first} · {term.name} 第 {week} 周' } },
+        },
+      ],
+    };
+  }
   if (mode !== 'import') return null;
   return {
     format: 'timetable-plugin',

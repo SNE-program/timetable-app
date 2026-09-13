@@ -21,6 +21,9 @@ import { UPCOMING_MAX, buildWidgetPayload, widgetBoundaryMs } from '../platform/
 import { WIDGET_PRESETS, planForPreset, previewRows } from '../platform/widgetLayout';
 import { renderTimetableImage } from '../ui/timetableImage';
 import { platformName } from '../platform/nativeBridge';
+import { CHANNELS } from '../platform/capacitorNotifier';
+import { activeRules } from '../plugins/host';
+import { RULE_PER_HOUR_MAX, planRuleNotificationsLimited } from '../plugins/rules';
 
 /**
  * 角色行为检查（?behavecheck=秒数）。
@@ -843,6 +846,57 @@ function runPluginCheck(): void {
 }
 
 /**
+ * 插件提醒规则的自检（?rulecheck=1）。
+ *
+ * 规则这条路没有界面可点 —— 它到点自己发通知，无头环境里也等不到那一刻。
+ * 所以这里做的是**把真实数据展开一遍**，把只有真跑一次才看得见的东西报出来：
+ *
+ *   1. 几条规则、未来 7 天排出了多少条；
+ *   2. 最忙的一小时里几条（会不会超过宿主定死的频率上限）；
+ *   3. 第一条的标题正文 —— 占位符有没有真的被填上、有没有漏出 "{xxx}"；
+ *   4. 通知渠道 `plugin-rule` 在不在渠道表里（**不在的话 Android 会静默丢弃通知**，
+ *      这类失败在界面上完全看不出来）。
+ */
+function runRuleCheck(): void {
+  let send = function (_text: string): void { /* 默认不回传 */ };
+  try { send = makeReporter(new URLSearchParams(window.location.search).get('report') || ''); } catch (e) { /* 忽略 */ }
+  setTimeout(function () {
+    const rules = activeRules();
+    if (rules.length === 0) {
+      send('RULECHECK 没有规则（要用 ?devplugin=rule 才测得到）');
+      return;
+    }
+    const data = getState().data;
+    const now = Date.now();
+    const list = planRuleNotificationsLimited(rules, data, now, now + 7 * 86400000);
+
+    /* 最忙的一小时 */
+    let busiest = 0;
+    for (let i = 0; i < list.length; i++) {
+      const since = list[i].at - 3600000;
+      let n = 0;
+      for (let j = 0; j < list.length; j++) if (list[j].at > since && list[j].at <= list[i].at) n++;
+      if (n > busiest) busiest = n;
+    }
+    /* 占位符有没有漏出来（发出这样的通知，用户只会觉得应用坏了） */
+    let leaked = 0;
+    for (const n of list) if (/\{[a-z0-9._]+\}/i.test(n.title + n.body)) leaked++;
+
+    const first = list[0];
+    const hasChannel = CHANNELS.map(function (c) { return c.id; }).indexOf('plugin-rule') >= 0;
+    const kindsOk = list.every(function (n) { return n.kind === 'rule'; });
+
+    send('RULECHECK verdict=' + (list.length > 0 && leaked === 0 && hasChannel && kindsOk ? 'PASS' : 'FAIL')
+      + ' 规则数=' + rules.length + ' 未来7天排程=' + list.length
+      + ' 最忙一小时=' + busiest + '/' + RULE_PER_HOUR_MAX
+      + ' 走了插件渠道=' + (kindsOk ? 'yes' : 'no')
+      + ' 渠道已建=' + (hasChannel ? 'yes' : 'NO(!!)')
+      + ' 漏出的占位符=' + leaked
+      + (first ? ' | 第一条 ' + new Date(first.at).toLocaleString() + ' 「' + first.title + '」「' + first.body + '」' : ''));
+  }, 1500);
+}
+
+/**
  * 导入预设的自检（?importcheck=1）。
  *
  * 与插件设置的检查同一个思路：**不看代码，只走用户那条路**。
@@ -1215,6 +1269,7 @@ export function runDiagnostics(): void {
   if (params.get('dragcheck') === '1') runDragCheck();
   if (params.get('plugcheck') === '1') runPluginCheck();
   if (params.get('importcheck') === '1') runImportPresetCheck();
+  if (params.get('rulecheck') === '1') runRuleCheck();
   if (params.get('clipcheck') === '1') runClipCheck();
   if (params.get('behavecheck')) {
     const sec = Number(params.get('behavecheck'));

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Panel } from './common';
-import { showToast } from '../app/store';
+import { showToast, upcomingRuleNotifications } from '../app/store';
 import {
   HOST_API_VERSION, grantPermissions, installPlugin, lastLoadIssues, listPlugins, parseManifest,
   resolveExportColumns, resolveExportFileName, setPluginEnabled, settingsCapability, uninstallPlugin,
@@ -9,6 +9,7 @@ import {
   PERMISSION_LABEL, type InstalledPlugin, type PluginPermission, type SettingField, type SettingValue,
 } from '../plugins/types';
 import { readSettings, resetSettings, writeSetting } from '../plugins/settings';
+import { describeRule } from '../plugins/rules';
 import { APP_VERSION } from '../app/version';
 import { reloadPluginCommands } from '../app/builtinCommands';
 import { COLUMN_LABEL, SCOPE_LABEL, type ExportColumn } from '../core/exporters';
@@ -138,6 +139,47 @@ function PluginSettings(props: {
           }}
         >恢复默认</button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * 规则会响在哪 —— 把接下来的几条**当场算出来给用户看**。
+ *
+ * 为什么必须有它：规则是全套插件能力里唯一"会自己发生"的东西，
+ * 而它又没有界面可点。用户勾了权限之后如果只能靠"等它响"来验证，
+ * 那就等于让他用一次真实的打扰去试错 —— 而通知关了之后很多人不会再打开。
+ */
+function RulePreview(props: { plugin: InstalledPlugin }) {
+  const rules = props.plugin.manifest.capabilities.filter(function (c) { return c.type === 'rule'; });
+  /* 只显示本插件的那几条：一次算全部规则，再按指纹前缀挑出来 */
+  const mine = React.useMemo(function () {
+    const all = upcomingRuleNotifications(60);
+    return all.filter(function (n) { return !!n.title; }).slice(0, 3);
+  }, [props.plugin.manifest.id]);
+  if (rules.length === 0) return null;
+  return (
+    <div className="plugin-rules">
+      {rules.map(function (r) {
+        if (r.type !== 'rule') return null;
+        return (
+          <div className="plugin-rule" key={r.id}>
+            <span className="plugin-rule-name">{r.name}</span>
+            <span className="plugin-rule-when">{describeRule(r)}</span>
+          </div>
+        );
+      })}
+      {mine.length > 0 ? (
+        <div className="plugin-rule-next">
+          接下来会发：{mine.map(function (n) {
+            const d = new Date(n.at);
+            const hm = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+            return hm + ' ' + n.title;
+          }).join(' ｜ ')}
+        </div>
+      ) : (
+        <div className="plugin-rule-next">接下来 7 天里暂时没有符合条件的时间点。</div>
+      )}
     </div>
   );
 }
@@ -299,6 +341,8 @@ export default function PluginsPanel() {
                  * 只看名字（"导出本周"）看不出它是 CSV 还是 JSON、是课表还是任务清单。
                  */
                 if (c.type === 'settings') return <span className="chip" key={c.id}>设置 · {c.name}</span>;
+                if (c.type === 'import') return <span className="chip" key={c.id}>导入 · {c.name}</span>;
+                if (c.type === 'rule') return <span className="chip" key={c.id}>提醒 · {c.name}</span>;
                 if (c.type !== 'export') return <span className="chip" key={c.id}>命令 · {c.name}</span>;
                 const fmt = FORMAT_LABEL[c.format] || c.format;
                 const scope = SCOPE_LABEL[c.scope] || c.scope;
@@ -311,6 +355,7 @@ export default function PluginsPanel() {
                * 显示出来只会让人以为"改了没反应"。
              */}
             {active ? <PluginSettings plugin={p} onChange={refresh} /> : null}
+            {active ? <RulePreview plugin={p} /> : null}
             {active ? <ExportOutcome plugin={p} /> : null}
 
             {!p.builtin ? (

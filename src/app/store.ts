@@ -27,10 +27,11 @@ import { announceChange } from './reminderRuntime';
 import { deleteAsset, getAsset, kvDelete, kvGetSync, kvSet, putAsset } from '../storage';
 import { extractAssets, hydrateAssets } from '../storage/assetRef';
 import {
-  activeCommands, activeExports, resetPlugins, resolveExportColumns, resolveExportFileName,
+  activeCommands, activeExports, activeRules, resetPlugins, resolveExportColumns, resolveExportFileName,
   type ActiveCommand, type ActiveExport,
 } from '../plugins/host';
 import { settingsStorageKey as pluginsSettingsKey } from '../plugins/settings';
+import { planRuleNotificationsLimited } from '../plugins/rules';
 import { reloadPluginCommands } from './builtinCommands';
 import {
   FORMAT_EXT, courseRows, currentWeek, exportFileName, renderExport, rowsForScope, termRows, toGroupedMarkdown,
@@ -3076,6 +3077,26 @@ export function clearPluginData(): void {
   reloadPluginCommands();
   patchPrefs({ pluginDataAt: Date.now() });
   showToast('已清掉插件数据：安装记录、授权、以及各插件的设置都没了（内置导出格式不受影响）', 'ok');
+}
+
+/**
+ * 已启用插件的规则在**接下来 7 天**里会发哪些通知。
+ *
+ * 插件面板用它把"这条规则什么时候响、响的时候说什么"摆出来 ——
+ * 规则没有界面可点，不给用户看一眼结果，他只能靠猜；
+ * 而通知是**打扰人的东西**，"装上试试看"的代价是手机真的会响。
+ */
+export function upcomingRuleNotifications(limit: number): { at: number; title: string; body: string }[] {
+  try {
+    const rules = activeRules();
+    if (rules.length === 0) return [];
+    const now = Date.now();
+    return planRuleNotificationsLimited(rules, state.data, now, now + 7 * 86400000)
+      .slice(0, Math.max(1, limit))
+      .map(function (n) { return { at: n.at, title: n.title, body: n.body }; });
+  } catch (e) {
+    return [];
+  }
 }
 
 /** 插件数据有没有被清过（设置页据此显示"清掉于 …"） */

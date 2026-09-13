@@ -10,7 +10,13 @@ export interface ReminderPrefs {
   briefHour: number;
 }
 
-export type NotificationKind = 'class' | 'brief' | 'task';
+/**
+ * 通知的种类。它决定**走哪个通知渠道**（用户可以在系统里按渠道静音）。
+ *
+ * `rule` 是插件规则发出来的（v1.9.15）：单开一个渠道，
+ * 于是"不想被插件打扰"可以只关这一个，上课提醒不受影响。
+ */
+export type NotificationKind = 'class' | 'brief' | 'task' | 'rule';
 
 export interface PlannedNotification {
   /** 去重指纹：sessionId@date#offset / brief@date */

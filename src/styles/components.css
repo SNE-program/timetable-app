@@ -567,6 +567,19 @@ input[type="range"].rng::-moz-range-thumb { width: 12px; height: 12px; border-ra
 .plugin-field .input { width: 100%; }
 .plugin-field .plugin-perms { margin-top: 2px; }
 .plugin-field-actions { display: flex; justify-content: flex-end; margin-top: 10px; }
+
+/* ---------- 插件规则的预览（v1.9.15） ---------- */
+.plugin-rules {
+  margin-top: 10px; padding: 9px 12px;
+  border: 1px solid var(--c-border); border-radius: var(--r-panel);
+  background: var(--c-surface-2);
+}
+.plugin-rule { display: flex; align-items: baseline; gap: 8px; margin-top: 4px; }
+.plugin-rule:first-child { margin-top: 0; }
+.plugin-rule-name { font-size: var(--fs-sm); color: var(--c-text); }
+.plugin-rule-when { font-size: var(--fs-xs); color: var(--c-text-muted); font-variant-numeric: tabular-nums; }
+.plugin-rule-next { font-size: var(--fs-xs); color: var(--c-text-muted); line-height: 1.6; margin-top: 6px; word-break: break-word; }
+
 .plugin-outcome {
   margin-top: 8px; font-size: var(--fs-xs); color: var(--c-text-muted);
   line-height: 1.6; word-break: break-word;
