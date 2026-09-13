@@ -1,7 +1,7 @@
 import React from 'react';
 import { Icon } from './icons';
 import { describeSize } from '../cloud/backup';
-import { MAX_MASCOT_BYTES, estimateMascotBytes, formatMb, isMine } from '../cloud/mascots';
+import { MAX_MASCOT_BYTES, estimateMascotBytes, formatMb, isMine, publicMascots } from '../cloud/mascots';
 import {
   cloudDeleteMascot, cloudLoadMascots, cloudQuotaLine, cloudSetMascotPublic, cloudShareMascot,
   cloudUploadMascot, cloudUseMascot, cloudUseShareCode, useApp,
@@ -55,7 +55,11 @@ export default function MascotCloudSection() {
   const mine = c.mascots.filter(function (m) { return isMine(m, me); });
   /* 公开列表只对「额度不设限」的账号有意义 —— 别人的角色只通过分享码流转 */
   const canPublish = !!(c.quota && c.quota.unlimited);
-  const others = canPublish ? c.mascots.filter(function (m) { return m.is_public && !isMine(m, me); }) : [];
+  /*
+   * 公开列表 = 所有人的公开角色（**包括自己的**）。
+   * 以前写成"别人公开的"，于是作者自己公开之后这里永远是 0 —— 见 publicMascots 的说明。
+   */
+  const published = publicMascots(c.mascots, me);
   const localPack = s.mascot;
 
   const localSize = React.useMemo(function () {
@@ -175,21 +179,39 @@ export default function MascotCloudSection() {
       {canPublish ? (
         <React.Fragment>
           <div className="panel-desc" style={{ paddingTop: 10, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Icon name="globe" size={14} /> 公开角色（{others.length}）
+            <Icon name="globe" size={14} /> 公开角色（{published.all.length}）
           </div>
-          {others.length === 0 ? (
+          {published.all.length === 0 ? (
             <div className="panel-desc">还没有公开的角色。公开是给「想让所有人都能用」准备的；只想给某个同学，用分享码更省事。</div>
-          ) : others.map(function (m) {
+          ) : published.all.map(function (m) {
+            const mine = isMine(m, me);
             return (
-              <div className="list-row" key={m.id}>
-                <div>
-                  <div className="lr-label">{m.name}</div>
-                  <div className="lr-sub">公开的 · {describeSize(m.size_bytes)}</div>
+              /*
+               * 这里以前用 .list-row（一行两列）—— 名称 + 一个按钮还行，
+               * 但自己的公开角色要同时给「使用」和「取消公开」，窄屏上又会挤 —— 用 action-item。
+               */
+              <div className="action-item" key={m.id}>
+                <div className="ai-head">
+                  <div className="ai-title">
+                    <span>{m.name}</span>
+                    {mine ? <span className="ai-tag">我的</span> : null}
+                    <span className="ai-tag on">公开</span>
+                  </div>
+                  <div className="ai-meta">
+                    {describeSize(m.size_bytes)}
+                    {mine && m.share_code ? <span> · 分享码 <b className="ai-code">{m.share_code}</b></span> : null}
+                  </div>
                 </div>
-                <div className="lr-right">
+                <div className="ai-actions">
                   <button className="btn sm primary" disabled={busy} onClick={function () { void cloudUseMascot(m); }}>
                     {stage === 'download' ? '下载中' : stage === 'save' ? '保存中' : '使用'}
                   </button>
+                  {/* 自己的可以直接取消公开；别人的只给「使用」 */}
+                  {mine ? (
+                    <button className="btn sm ghost" disabled={busy} onClick={function () { void cloudSetMascotPublic(m, false); }}>
+                      取消公开
+                    </button>
+                  ) : null}
                 </div>
               </div>
             );

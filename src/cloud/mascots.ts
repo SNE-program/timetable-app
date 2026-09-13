@@ -90,6 +90,33 @@ export function isMine(m: CloudMascot, userId: string | null): boolean {
   return !!userId && m.user_id === userId;
 }
 
+/**
+ * 「公开角色」列表该显示什么。
+ *
+ * ## 这里出过一个自相矛盾的 bug
+ *
+ * 原来的过滤条件是 `is_public && !isMine(m, me)` —— 也就是"别人公开的"。
+ * 而公开这个能力只开给额度不设限的账号（作者自己），于是**作者自己公开的角色全被排除**，
+ * 列表永远显示 0：数据库里明明有两个公开角色，界面说一个都没有。
+ *
+ * 正确的语义是：公开列表 = **所有人的公开角色**，自己的那些用「我的」标出来。
+ * 拆成纯函数是因为这条规则值得被单测钉住 —— 它是"界面与数据库不一致"这类问题的典型。
+ */
+export function publicMascots(list: CloudMascot[], me: string | null): {
+  /** 全部公开角色（含自己的），按创建时间新到旧 */
+  all: CloudMascot[];
+  /* 拆开只是为了界面能分组显示，不再用来过滤掉自己 */
+  mine: CloudMascot[];
+  others: CloudMascot[];
+} {
+  const all = list.filter(function (m) { return !!m.is_public; });
+  return {
+    all: all,
+    mine: all.filter(function (m) { return isMine(m, me); }),
+    others: all.filter(function (m) { return !isMine(m, me); }),
+  };
+}
+
 /** 本地这份角色包能不能上传：能的话返回正文与大小 */
 export function prepareMascotUpload(pack: MascotPack): { text: string; bytes: number; missingAssets: boolean } {
   /*

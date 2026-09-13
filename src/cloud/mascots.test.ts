@@ -8,7 +8,8 @@ import { buildDemoData } from '../core/demo';
 import { __setCloudConfigForTest } from './config';
 import {
   MAX_MASCOT_BYTES, estimateMascotBytes, fetchMascot, formatMb, isMine, looksLikeShareCode, myQuota,
-  newShareCode, normalizeShareCode, prepareMascotUpload, quotaLine, resolveShare, setMascotShare, uploadMascot,
+  newShareCode, normalizeShareCode, prepareMascotUpload, publicMascots, quotaLine, resolveShare, setMascotShare,
+  uploadMascot, type CloudMascot,
 } from './mascots';
 
 /**
@@ -328,5 +329,46 @@ describe('分享码', function () {
   it('码不存在时返回 null（不抛错，让界面说人话）', async function () {
     stub(function () { return { json: [] }; });
     expect(await resolveShare(null, 'ZZZZZZZZ')).toBeNull();
+  });
+});
+/* =========================== v1.9.9：公开列表该显示谁 =========================== */
+
+/*
+ * 这条规则曾经写错：原过滤条件是 `is_public && !isMine(m, me)`（只要"别人公开的"），
+ * 而公开只开给额度不设限的账号（作者自己）—— 于是作者公开之后列表永远是 0，
+ * 数据库里明明有两个、界面说一个都没有。单测把"自己的也要在列表里"钉在这里。
+ */
+
+function cm(over: Partial<CloudMascot> & { id: string }): CloudMascot {
+  return Object.assign({
+    user_id: 'u-mine', name: '角色', is_public: false, path: 'p', size_bytes: 100,
+    created_at: '2026-01-01', updated_at: '2026-01-01',
+  }, over);
+}
+
+describe('公开角色列表', function () {
+  const list: CloudMascot[] = [
+    cm({ id: 'a', user_id: 'u-mine', name: '我公开的甲', is_public: true }),
+    cm({ id: 'b', user_id: 'u-mine', name: '我公开的乙', is_public: true }),
+    cm({ id: 'c', user_id: 'u-mine', name: '我只分享未公开', is_public: false }),
+    cm({ id: 'd', user_id: 'u-other', name: '别人公开的', is_public: true }),
+  ];
+
+  it('★ 自己的公开角色必须在列表里（以前被过滤掉，作者自己永远是 0）', function () {
+    const r = publicMascots(list, 'u-mine');
+    expect(r.all.length).toBe(3);
+    expect(r.mine.map(function (x) { return x.name; })).toEqual(['我公开的甲', '我公开的乙']);
+    expect(r.others.map(function (x) { return x.name; })).toEqual(['别人公开的']);
+  });
+
+  it('未公开的角色不进公开列表（不管是不是自己的）', function () {
+    const r = publicMascots(list, 'u-mine');
+    expect(r.all.some(function (x) { return x.name === '我只分享未公开'; })).toBe(false);
+  });
+
+  it('没登录时看到的都算"别人的"（此时读到的本来就是公开行）', function () {
+    const r = publicMascots(list, null);
+    expect(r.mine.length).toBe(0);
+    expect(r.others.length).toBe(3);
   });
 });

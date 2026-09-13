@@ -7,8 +7,8 @@ android {
         applicationId "app.timetable.mobile"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 69
-        versionName "1.9.8"
+        versionCode 70
+        versionName "1.9.9"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         /*
          * 只保留真机在用的两种 ABI。
