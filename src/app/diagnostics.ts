@@ -735,13 +735,13 @@ function runWidgetPreviewCheck(): void {
     };
     createRoot(host).render(React.createElement(WidgetPreview, { payload: payload }));
     setTimeout(function () {
-      const frames = host.querySelectorAll('.wp-frame');
+      const frames = host.querySelectorAll('.wgt-frame');
       const caps: string[] = [];
       let overflow = false;
       for (let i = 0; i < frames.length; i++) {
         const el = frames[i] as HTMLElement;
         const r = el.getBoundingClientRect();
-        const rows = el.querySelectorAll('.wp-row').length;
+        const rows = el.querySelectorAll('.wgt-row').length;
         caps.push(el.getAttribute('data-size') + '=' + Math.round(r.width) + 'x' + Math.round(r.height) + '/' + rows + '行');
         if (r.right > window.innerWidth + 1) overflow = true;
       }
@@ -755,15 +755,15 @@ function runWidgetPreviewCheck(): void {
       document.body.appendChild(host2);
       createRoot(host2).render(React.createElement(WidgetPreview, { payload: fake }));
       setTimeout(function () {
-        const f2 = host2.querySelectorAll('.wp-frame');
+        const f2 = host2.querySelectorAll('.wgt-frame');
         const caps2: string[] = [];
         let over2 = false;
         for (let i = 0; i < f2.length; i++) {
           const el = f2[i] as HTMLElement;
           const r = el.getBoundingClientRect();
-          const rows = el.querySelectorAll('.wp-row').length;
+          const rows = el.querySelectorAll('.wgt-row').length;
           /* 行里的课程名有没有被挤没：宽度小于 8px 就是被挤没了 */
-          const titles = el.querySelectorAll('.wp-title');
+          const titles = el.querySelectorAll('.wgt-title');
           let minTitle = 999;
           for (let j = 0; j < titles.length; j++) minTitle = Math.min(minTitle, (titles[j] as HTMLElement).getBoundingClientRect().width);
           caps2.push(el.getAttribute('data-size') + '=' + Math.round(r.width) + 'x' + Math.round(r.height)
@@ -1071,7 +1071,7 @@ export function runDiagnostics(): void {
         scroller = scroller.parentElement;
       }
       if (insideScroller) continue;
-      if (el.closest('.tl') || el.closest('.wp-grid')) continue;
+      if (el.closest('.tl') || el.closest('.wgt-grid')) continue;
       if (r.width > vw + 1 || r.right > vw + 1 || r.left < -1) {
         wide.push(describe(el) + ' w=' + Math.round(r.width) + ' R=' + Math.round(r.right));
       }

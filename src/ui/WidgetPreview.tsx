@@ -20,7 +20,7 @@ export default function WidgetPreview(props: { payload: WidgetPayload }) {
   const now = Date.now();
 
   return (
-    <div className="wp-grid">
+    <div className="wgt-grid">
       {WIDGET_PRESETS.map(function (preset) {
         const plan = planForPreset(preset);
         const max = preset.kind === 'next' ? plan.extraRows : plan.listRows;
@@ -28,40 +28,40 @@ export default function WidgetPreview(props: { payload: WidgetPayload }) {
         const rows = view.rows;
         const empty = !view.next && rows.length === 0;
         return (
-          <div className="wp-item" key={preset.label + preset.kind}>
-            <div className="wp-frame" data-size={preset.label}>
-              <div className="wp-card">
-                <div className="wp-term">{props.payload.term || '课表助手'}</div>
+          <div className="wgt-item" key={preset.label + preset.kind}>
+            <div className="wgt-frame" data-size={preset.label}>
+              <div className="wgt-card">
+                <div className="wgt-term">{props.payload.term || '课表助手'}</div>
                 {view.next ? (
                   <React.Fragment>
-                    <div className="wp-next">
-                      <div className="wp-next-main">
-                        <div className="wp-next-title">{view.next.title}</div>
-                        <div className="wp-next-sub">{[view.next.location, view.next.start + '-' + view.next.end].filter(Boolean).join(' · ')}</div>
+                    <div className="wgt-next">
+                      <div className="wgt-next-main">
+                        <div className="wgt-next-title">{view.next.title}</div>
+                        <div className="wgt-next-sub">{[view.next.location, view.next.start + '-' + view.next.end].filter(Boolean).join(' · ')}</div>
                       </div>
-                      <div className="wp-count">00:12</div>
+                      <div className="wgt-count">00:12</div>
                     </div>
-                    {rows.length > 0 ? <div className="wp-sep" /> : null}
+                    {rows.length > 0 ? <div className="wgt-sep" /> : null}
                   </React.Fragment>
                 ) : null}
                 {rows.map(function (it) {
                   return (
-                    <div className="wp-row" key={it.courseId + it.startMs}>
-                      <span className="wp-time">{it.start}</span>
-                      <span className="wp-title">{it.title}</span>
-                      {plan.narrow ? null : <span className="wp-where">{it.location || it.period}</span>}
+                    <div className="wgt-row" key={it.courseId + it.startMs}>
+                      <span className="wgt-time">{it.start}</span>
+                      <span className="wgt-title">{it.title}</span>
+                      {plan.narrow ? null : <span className="wgt-where">{it.location || it.period}</span>}
                     </div>
                   );
                 })}
                 {empty ? (
-                  <div className="wp-empty">打开应用同步一次</div>
+                  <div className="wgt-empty">打开应用同步一次</div>
                 ) : null}
-                {!empty && !view.next && rows.length === 0 ? <div className="wp-empty">今天没有课了</div> : null}
+                {!empty && !view.next && rows.length === 0 ? <div className="wgt-empty">今天没有课了</div> : null}
               </div>
             </div>
-            <div className="wp-cap">
+            <div className="wgt-cap">
               <b>{preset.label}</b> · {preset.note}
-              <div className="wp-note">
+              <div className="wgt-note">
                 {plan.narrow ? '这个宽度下会收起「地点」，把位置让给课程名。' : '宽度够，时间 / 课程名 / 地点三列都在。'}
               </div>
             </div>
