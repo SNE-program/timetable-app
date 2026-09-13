@@ -3,6 +3,7 @@ import {
   blinkDelayFor, motionVars, type MascotBehavior, type MascotPhase, type MascotReaction,
 } from '../mascot/motion';
 import { frameCount, type MascotAsset, type MascotMotion } from '../mascot/types';
+import { frameStepMs, stepFrame } from '../mascot/playback';
 import { cellOffset, sheetTranslate } from '../mascot/sheet';
 import { useAssetAspect } from './useAssetAspect';
 
@@ -24,9 +25,6 @@ import { useAssetAspect } from './useAssetAspect';
  * 现在改成：外层容器裁剪、内层整图按**像素**平移（`translate`）。
  * 纯像素没有百分比语义可踩，而且是合成层变换，不触发重绘 —— 手机上更稳。
  */
-
-/** 一帧要补几帧：应用被切到后台再回来时不要一口气猛跳几十帧 */
-const MAX_CATCHUP = 1;
 
 /**
  * 开发检查用：`?frame=N` 固定显示第 N 帧，不要动画。
@@ -118,6 +116,21 @@ export default function MascotArt(props: {
   const fixed = React.useMemo(function () { return devFixedFrame(); }, []);
   const shown = fixed === null ? frame : fixed;
 
+  /** 正在播的一次性反应（被点一下）；命令式地加/摘 rx-* 类名要拿它 */
+  const innerRef = React.useRef<HTMLDivElement>(null);
+  const reaction = props.reaction || null;
+  const reactionSeq = props.reactionSeq || 0;
+  /** 这个反应是不是**由角色包自带的素材在演**（静态图不算 —— 它不会动，得靠程序化动作） */
+  const reactionIsAsset = !!props.reactionIsAsset;
+  /*
+   * 逐帧素材演的反应**只播一遍**：每次被点都从第一帧开始，播到最后一帧**停住**，
+   * 等状态机到点（reactionUntil）再切回待机。
+   *
+   * 这正是"点一下之后的动画要完整播完"的落点 —— 早先它跟着待机那套无限循环走，
+   * "从第几帧开始、演到第几帧被切掉"完全看运气，用户看到的就是动作演到一半没了。
+   */
+  const rxOnce = reactionIsAsset && asset.kind === 'sheet';
+
   /*
    * 帧推进用 rAF + 时间累加，而不是 setInterval。
    *
@@ -128,28 +141,29 @@ export default function MascotArt(props: {
    */
   React.useEffect(function () {
     if (fixed !== null || paused || phase === 'drag' || frames < 2) { setFrame(0); return; }
-    const own = asset.fps ? asset.fps : 8;
-    const fps = fpsOverride && fpsOverride >= 2 ? fpsOverride : own;
-    const step = 1000 / Math.max(1, fps);
+    /* 帧率与"一次怎么走"都在 playback.ts 里：那里同时被状态机用来算反应该播多久 */
+    const step = frameStepMs(asset, fpsOverride);
     let raf = 0;
     let last = 0;
     let acc = 0;
     let cur = 0;
+    let shownNow = -1;
+    if (rxOnce) { setFrame(0); shownNow = 0; }   /* 每次被点都从第一帧开始 */
     const loop = function (t: number): void {
       if (last === 0) last = t;
-      acc += t - last;
+      const dt = t - last;
       last = t;
-      if (acc >= step) {
-        const advance = Math.min(MAX_CATCHUP, Math.floor(acc / step));
-        acc -= Math.floor(acc / step) * step;
-        cur = (cur + advance) % frames;
-        setFrame(cur);
-      }
+      const r = stepFrame({ cur: cur, acc: acc, dt: dt, step: step, frames: frames, once: rxOnce });
+      cur = r.frame;
+      acc = r.acc;
+      if (cur !== shownNow) { shownNow = cur; setFrame(cur); }
+      /* 只播一遍的那种：播完就停在这里，不再排下一帧 */
+      if (r.done) return;
       raf = window.requestAnimationFrame(loop);
     };
     raf = window.requestAnimationFrame(loop);
     return function () { window.cancelAnimationFrame(raf); };
-  }, [fixed, paused, phase, frames, asset.fps, fpsOverride]);
+  }, [fixed, paused, phase, frames, asset.fps, fpsOverride, rxOnce, reactionSeq]);
 
   /*
    * 眨眼。
@@ -174,17 +188,19 @@ export default function MascotArt(props: {
   }, [paused, phase, blink]);
 
   /*
-   * 一次性反应（被点一下）：hop / sway / startle / peek。
+   * 一次性反应（被点一下）：hop / startle / peek（sway 已在 1.9.1 删掉）。
    *
    * 用命令式地"摘掉再加回"类名来重启动画 —— 这是唯一可靠的做法：
    * 连着两次点到同一种反应时，React 认为 className 没变，CSS 动画不会重播。
-   * 任何素材形态（静态图 / 动图 / 逐帧图）都能看到这个反应，因为它只动 transform。
+   *
+   * 什么时候走这一层：
+   *   - 没有 react 素材 → 当然走；
+   *   - react 素材是**静态图** → 也走（它自己不会动，不走这一层用户点了就像没反应）；
+   *   - react 素材是逐帧图 / 动图 → 让位给素材自己演（它会动，叠一层 transform 只会打架）。
+   *
+   * 程序的这一层只动 transform，所以任何素材形态都看得到；`rxOnce` 那段负责的是
+   * 素材那一层"要播完"，两者合起来才是"点一下之后的动画完整播完"。
    */
-  const innerRef = React.useRef<HTMLDivElement>(null);
-  const reaction = props.reaction || null;
-  const reactionSeq = props.reactionSeq || 0;
-  /** 素材自己在演反应时，程序化那一层完全让位 */
-  const reactionIsAsset = !!props.reactionIsAsset;
   React.useEffect(function () {
     const el = innerRef.current;
     if (!el || !reaction || reactionIsAsset || paused) return;
@@ -221,8 +237,10 @@ export default function MascotArt(props: {
            */
           <div
             className="mascot-sheet"
-            /* 检查要拿它对账：现在显示第几帧、容器一格多大 */
+            /* 检查要拿它对账：现在显示第几帧、一共几帧、容器一格多大 */
             data-frame={shown}
+            data-frames={frames}
+            data-once={rxOnce ? '1' : '0'}
             data-cellw={Math.round(cellW)}
             style={{
               width: cellW + 'px',
@@ -245,7 +263,18 @@ export default function MascotArt(props: {
             />
           </div>
         ) : (
-          <img className="mascot-img" src={asset.src} alt="" draggable={false} />
+          /*
+           * 动图由浏览器自己循环播，DOM 上没有接口能让它"从头开始" ——
+           * 换一个 key 让节点重建，就是最直接的重新开始。
+           * 只对"正在演反应的动图"这么做：平时重建一个几 MB 的节点会白掉一帧。
+           */
+          <img
+            key={reactionIsAsset && asset.kind === 'animated' ? 'rx' + reactionSeq : 'asset'}
+            className="mascot-img"
+            src={asset.src}
+            alt=""
+            draggable={false}
+          />
         )}
         {/* 眨眼只对"一张静态图"做：逐帧图自己会动，再叠一层会打架 */}
         {blink && !isSheet ? <div className="mascot-blink" /> : null}

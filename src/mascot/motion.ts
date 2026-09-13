@@ -73,6 +73,14 @@ export interface MascotRuntime {
   /** 正在播的一次性反应；没有就是 null */
   reaction: MascotReaction | null;
   reactionUntil: number;
+  /**
+   * 这次反应**实际**要播多久（毫秒）= max(程序化动作那个时长, 素材自己一遍的长度)。
+   *
+   * 存下来是为了让界面（与自检）能读到"这一次打算播多久"，
+   * 而不是各处各算一遍 —— 素材的长度差异（帧数 ÷ 帧率、动图循环长度）
+   * 正是"时间可能不一样"那句话的来源。
+   */
+  reactionHold: number;
   /** 最近两次播过的反应 */
   recentReactions: MascotReaction[];
   /** 反应序号：每播一次反应 +1，界面靠它可靠地重启动画 */
@@ -83,7 +91,13 @@ export interface MascotRuntime {
   nextStirAt: number;
 }
 
-/** 点一下的反应持续多久（会在此基础上随机） */
+/**
+ * 点一下的程序化反应持续多久（毫秒）——**这是下限，不是固定的 0.9 秒**。
+ *
+ * 真正决定"反应演多久"的是 `poke` 写进去的 `reactionUntil`：
+ * 素材自己能演多久（逐帧图 = 帧数 ÷ 帧率、动图 = 量出来的循环长度）就留多久，
+ * 静态图才用这个数。见 playback.ts 的 reactHoldMs。
+ */
 export const REACT_MS = 900;
 /** 多久没人理就打瞌睡 */
 export const SLEEP_AFTER_MS = 3 * 60 * 1000;
@@ -284,6 +298,7 @@ export function initialRuntime(now: number, rng?: Rng): MascotRuntime {
     jitter: rolled.jitter,
     reaction: null,
     reactionUntil: 0,
+    reactionHold: 0,
     recentReactions: [],
     reactionSeq: 0,
     stirUntil: 0,
@@ -377,6 +392,7 @@ export function advance(rt: MascotRuntime, now: number, dragging: boolean, opts?
       nextStirAt: 0,
       reaction: null,
       reactionUntil: 0,
+      reactionHold: 0,
     });
   }
   if (rt.phase === 'drag') return rt;
@@ -386,7 +402,17 @@ export function advance(rt: MascotRuntime, now: number, dragging: boolean, opts?
   let recentReactions = rt.recentReactions;
   if (reaction && now >= rt.reactionUntil) reaction = null;
 
-  if (rt.phase === 'react' && now - rt.since >= REACT_MS) {
+  /*
+   * 反应演完了 → 回到被点之前的状态。
+   *
+   * ★ 判据必须是 `reactionUntil`，**不能是固定的 REACT_MS**。
+   * 早先这里写的是 `now - rt.since >= REACT_MS`，于是不管素材要演多久，
+   * 0.9 秒一到就切走 —— 一段 2.4 秒的逐帧反应只能看到前三分之一，
+   * 用户看到的就是"点一下，动作演到一半没了"。
+   * 现在时间由 poke 按素材本身算好写进 reactionUntil，这里只负责到点收工。
+   */
+  const reactUntil = rt.reactionUntil > 0 ? rt.reactionUntil : rt.since + REACT_MS;
+  if (rt.phase === 'react' && now >= reactUntil) {
     return Object.assign({}, rt, {
       phase: rt.before === 'sleep' ? 'sleep' : 'idle',
       since: now,
@@ -486,7 +512,7 @@ export function advance(rt: MascotRuntime, now: number, dragging: boolean, opts?
 export function nextWakeAt(rt: MascotRuntime, opts?: AdvanceOpts): number {
   const times = [rt.behaviorUntil];
   if (rt.reaction) times.push(rt.reactionUntil);
-  if (rt.phase === 'react') times.push(rt.since + REACT_MS);
+  if (rt.phase === 'react') times.push(rt.reactionUntil > 0 ? rt.reactionUntil : rt.since + REACT_MS);
   const stirUntil = rt.stirUntil || 0;
   if (rt.phase === 'sleep') {
     /* 睡着时排的是"下一次醒一下"；醒了之后才需要睡点 */
@@ -527,6 +553,7 @@ export function poke(
     before: rt.phase === 'sleep' ? ('sleep' as MascotPhase) : ('idle' as MascotPhase),
     reaction: kind,
     reactionUntil: now + hold,
+    reactionHold: hold,
     reactionSeq: rt.reactionSeq + 1,
     /* 被点等于醒了：半醒那一小段取消；如果本来在睡，睡回去之后重新排"醒一下" */
     stirUntil: 0,

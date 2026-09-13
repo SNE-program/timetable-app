@@ -64,6 +64,25 @@ function runBehaviorCheck(seconds: number): void {
   /** 反应由谁演：素材（data-state=react）/ 我们的程序化动作（rx-* 类） */
   let reactionByAsset = 0;
   let reactionByProc = 0;
+  /*
+   * ★ 反应"播完了没有"。
+   *
+   * 这一版的核心判据。素材是逐帧图时界面会把它从第 0 帧播到最后一帧、
+   * 然后停在那一帧（data-once=1），所以**采样到过最后一帧 = 完整播完**；
+   * 反过来，如果这次反应从头到尾都没走到最后一帧，它就是被切掉的。
+   *
+   * 同时记下每次反应实际持续了多久，跟 data-rx-hold 上写的期望值对账 ——
+   * "时间可能不一样"这件事因此变成一个能读出来的数，而不是感觉。
+   */
+  let rxStartAt = 0;
+  let rxWantMs = 0;
+  let rxFrames = 0;
+  let rxLastSeen = -1;
+  let rxOnce = false;
+  let rxComplete = 0;
+  let rxCut = 0;
+  const rxSeen: number[] = [];
+  const rxWant: number[] = [];
   /** 走动时实际用的是哪张素材（data-state）—— "走路与休息有没有区分开"就看它 */
   const walkStates: Record<string, boolean> = {};
   /** 走动时有没有在跑"迈步"动作（没有 walk 素材时才应该有） */
@@ -113,22 +132,42 @@ function runBehaviorCheck(seconds: number): void {
       seq.push(b);
       counts[b] = (counts[b] || 0) + 1;
     }
-    if (rx && rx !== lastReaction) {
-      reactions++;
+    const state = host && host.getAttribute('data-state');
+    /** 逐帧素材现在露的是第几帧 / 一共几帧 / 是不是"只播一遍" */
+    const sheetEl = document.querySelector('.mascot-sheet') as HTMLElement | null;
+    const frameNow = sheetEl ? Number(sheetEl.getAttribute('data-frame') || -1) : -1;
+    if (rx !== lastReaction) {
+      if (lastReaction) {
+        /* 上一次反应到这里结束：结算它的时长与"有没有播完" */
+        rxSeen.push(Date.now() - rxStartAt);
+        rxWant.push(rxWantMs);
+        if (rxOnce && rxFrames >= 2) {
+          if (rxLastSeen >= rxFrames - 1) rxComplete++; else rxCut++;
+        }
+      }
+      if (rx) {
+        reactions++;
+        reactionKinds.push(rx);
+        /* 新的一次：从这一刻起重新记账 */
+        rxStartAt = Date.now();
+        rxWantMs = host ? Number(host.getAttribute('data-rx-hold') || 0) : 0;
+        rxFrames = sheetEl ? Number(sheetEl.getAttribute('data-frames') || 0) : 0;
+        rxOnce = !!sheetEl && sheetEl.getAttribute('data-once') === '1';
+        rxLastSeen = frameNow;
+        /*
+         * 这个反应是谁在演？
+         *   素材 —— 角色包自带 react 素材，界面切到了 data-state=react，且没有 rx-* 类
+         *   程序 —— 我们叠的那套 rx-* transform
+         * 这一版的要求是"变化多基于给定动画"，所以这两个数要能分开看。
+         */
+        const byProc = el.className.indexOf('rx-') >= 0;
+        if (state === 'react' && !byProc) reactionByAsset++;
+        else if (byProc) reactionByProc++;
+      }
       lastReaction = rx;
-      reactionKinds.push(rx);
-      /*
-       * 这个反应是谁在演？
-       *   素材 —— 角色包自带 react 素材，界面切到了 data-state=react，且没有 rx-* 类
-       *   程序 —— 我们叠的那套 rx-* transform
-       * 这一版的要求是"变化多基于给定动画"，所以这两个数要能分开看。
-       */
-      const state = host && host.getAttribute('data-state');
-      const byProc = el.className.indexOf('rx-') >= 0;
-      if (state === 'react' && !byProc) reactionByAsset++;
-      else if (byProc) reactionByProc++;
+    } else if (rx && frameNow > rxLastSeen) {
+      rxLastSeen = frameNow;
     }
-    if (!rx) lastReaction = '';
     if (b === 'walk') {
       walkSamples++;
       walkStates[(host && host.getAttribute('data-state')) || '?'] = true;
@@ -162,6 +201,14 @@ function runBehaviorCheck(seconds: number): void {
 
   window.setTimeout(function () {
     window.clearInterval(tick);
+    /* 结束时如果还在演，也把它结算掉（否则最后一次反应不会出现在报告里） */
+    if (lastReaction) {
+      rxSeen.push(Date.now() - rxStartAt);
+      rxWant.push(rxWantMs);
+      if (rxOnce && rxFrames >= 2) {
+        if (rxLastSeen >= rxFrames - 1) rxComplete++; else rxCut++;
+      }
+    }
     const finalRun = Date.now() - lastChangeAt;
     if (finalRun > longestRun) longestRun = finalRun;
     const kinds = Object.keys(counts);
@@ -170,6 +217,13 @@ function runBehaviorCheck(seconds: number): void {
       + ' 切换' + Math.max(0, seq.length - 1) + '次 最长同动作=' + (longestRun / 1000).toFixed(1) + 's'
       + ' 反应=' + reactions + '次' + (reactionKinds.length ? '[ ' + reactionKinds.join(' ') + ' ]' : '')
       + ' | 反应来源: 素材' + reactionByAsset + '/程序' + reactionByProc
+      + ' | ' + (reactions === 0
+        ? '反应完整: 这段里没被点过'
+        : (rxComplete + rxCut === 0
+          ? '反应完整: 不适用（这几次是程序化动作演的，没有逐帧素材）'
+          : '反应完整: ' + rxComplete + '/' + (rxComplete + rxCut)
+            + (rxCut > 0 ? '(!!) 被切掉' + rxCut + '次' : '(末帧都到了)'))
+          + ' 实测[' + rxSeen.join(',') + ']ms 期望[' + rxWant.join(',') + ']ms')
       + ' | 睡' + sleeps + '次 半醒' + stirs + '轮(采样' + stirSamples + '/' + samples + ')'
       + ' 睡着采样' + sleepSamples + '/' + samples
       + ' | 相位: ' + phaseSeq.join(' → ')

@@ -11,6 +11,7 @@ import { nextEvent, todayISO } from '../core/engine';
 import MascotArt from './MascotArt';
 import { Icon } from './icons';
 import { frameCount, type MascotAsset, type MascotState } from '../mascot/types';
+import { reactHoldMs } from '../mascot/playback';
 import { countRender } from '../app/renderCount';
 
 /**
@@ -103,6 +104,18 @@ export default function MascotOverlay() {
   const s = useApp();
   const pack = s.mascot;
   const mp = s.prefs.mascot;
+
+  /*
+   * ★ 被点一下之后，反应要保持多久。
+   *
+   * 这是"点一下的动画要完整播完"的算式所在：素材自己能演多久就留多久 ——
+   *   逐帧图（视频做的那种）：帧数 ÷ 帧率，精确；
+   *   动图（GIF / 动图 WebP / APNG）：从字节里量出循环长度；
+   *   静态图 / 没有 react 素材：交给程序化动作，取 REACTIONS 里那个时长。
+   * 以前这里写死 900ms，一段 2.4 秒的反应只演了前三分之一就被切回待机。
+   */
+  const reactAsset = pack ? pack.states.react : undefined;
+  const rxHoldMs = reactHoldMs(reactAsset, mp.fps, 0);
 
   /*
    * 随机源只在这里取一次，然后注入状态机。
@@ -319,9 +332,9 @@ export default function MascotOverlay() {
     if (rt.phase !== 'idle') return;
     /* 随机一次"下次最早什么时候再招手" */
     lastGreet.current = now + rngRef.current() * (GREET_MAX_MS - GREET_MIN_MS);
-    setRt(function (cur) { return poke(cur, Date.now(), rngRef.current); });
+    setRt(function (cur) { return poke(cur, Date.now(), rngRef.current, rxHoldMs); });
     setReactionSeq(function (n) { return n + 1; });
-  }, [active, pageVisible, reduced, mood.soon, rt.phase, clock]);
+  }, [active, pageVisible, reduced, mood.soon, rt.phase, clock, rxHoldMs]);
 
   /*
    * 开发检查用：?poke=N —— 让它自己每 4 秒被"点"一下，共 N 次。
@@ -340,11 +353,11 @@ export default function MascotOverlay() {
       n++;
       if (n > cap) { window.clearInterval(id); return; }
       interactionsRef.current = interactionsRef.current.concat([Date.now()]).slice(-12);
-      setRt(function (cur) { return poke(cur, Date.now(), rngRef.current); });
+      setRt(function (cur) { return poke(cur, Date.now(), rngRef.current, rxHoldMs); });
       setReactionSeq(function (k) { return k + 1; });
     }, 4000);
     return function () { window.clearInterval(id); };
-  }, [active, pageVisible]);
+  }, [active, pageVisible, rxHoldMs]);
 
   /*
    * 开发检查用：?mpos=0.95,0.6 直接把它放到指定锚点。
@@ -388,7 +401,14 @@ export default function MascotOverlay() {
    */
   const reactAssetOk = avail.indexOf('react') >= 0;
   const walkAssetOk = avail.indexOf('walk') >= 0;
-  const reactionIsAsset = !!rt.reaction && stateKey === 'react';
+  /*
+   * 这次反应是**素材自己在演**吗？
+   *
+   * 静态图不算 —— 一张不动的图"演"不出任何东西，点一下会像没反应。
+   * 所以只有逐帧图 / 动图才让位，静态图仍然由 rx-* 那套程序化动作来演。
+   */
+  const reactionIsAsset = !!rt.reaction && stateKey === 'react'
+    && !!reactAsset && reactAsset.kind !== 'still';
 
   /* -------------------- 位置 -------------------- */
 
@@ -580,8 +600,8 @@ React.useEffect(function () {
         /* 记一次互动：接下来几分钟它会更活泼（能量值会短暂上升） */
         interactionsRef.current = interactionsRef.current.concat([Date.now()]).slice(-12);
         setRt(function (cur) {
-          /* 自带 react 素材时至少播 0.9 秒：逐帧动画通常比我们那 0.5 秒长 */
-          return poke(cur, Date.now(), rngRef.current, reactAssetOk ? 900 : 0);
+          /* 时长按素材本身算：逐帧图 = 帧数 ÷ 帧率、动图 = 量出来的循环长度（见 rxHoldMs） */
+          return poke(cur, Date.now(), rngRef.current, rxHoldMs);
         });
         setReactionSeq(function (n) { return n + 1; });
       }
@@ -602,6 +622,8 @@ React.useEffect(function () {
         data-phase={phase}
         /* 打盹循环：1 = 正处在"睡了一觉之后醒一小会儿"的那一段（自检要看它） */
         data-stir={rt.stirUntil > 0 && phase !== 'sleep' ? '1' : '0'}
+        /* 这次反应**实际**播了多久（ms）—— 自检拿它和"实际持续了多久"对账 */
+        data-rx-hold={rt.reactionHold || rxHoldMs || 0}
         data-kind={asset.kind}
         data-state={stateKey}
         /* 检查用：把"网格几格、真实几帧"暴露出来，外部才能判断播到的格子是不是空档 */

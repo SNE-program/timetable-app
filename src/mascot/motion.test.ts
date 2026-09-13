@@ -34,8 +34,29 @@ describe('相位', function () {
     let rt = initialRuntime(T0, seeded(2));
     rt = poke(rt, T0, seeded(3));
     expect(rt.phase).toBe('react');
-    expect(advance(rt, T0 + REACT_MS - 50, false).phase).toBe('react');
-    expect(advance(rt, T0 + REACT_MS + 1, false).phase).toBe('idle');
+    /* 程序化反应的时长就是它那段 CSS 动画的时长（420–520ms）—— 见下面"按素材定长"那组 */
+    expect(advance(rt, rt.reactionUntil - 1, false).phase).toBe('react');
+    expect(advance(rt, rt.reactionUntil, false).phase).toBe('idle');
+  });
+
+  it('★ 反应持续多久由 reactionUntil 决定，不是一个固定的 0.9 秒', function () {
+    /*
+     * 这是"被点之后的动画要能完整播放"的回归测试。
+     *
+     * 旧行为：相位在 since + REACT_MS(900ms) 就结束，于是素材要演 2.4 秒时，
+     * 1.5 秒那一刻它已经被切回待机了 —— 动画演到一半没了。
+     */
+    const rt = poke(initialRuntime(T0, seeded(20)), T0, seeded(21), 2400);
+    expect(rt.reactionUntil).toBe(T0 + 2400);
+    expect(advance(rt, T0 + 1500, false).phase).toBe('react');
+    expect(advance(rt, T0 + 2399, false).phase).toBe('react');
+    expect(advance(rt, T0 + 2400, false).phase).toBe('idle');
+  });
+
+  it('★ 反应期间下一次唤醒排在反应真正结束的那一刻', function () {
+    const rt = poke(initialRuntime(T0, seeded(22)), T0, seeded(23), 2400);
+    /* 中途被唤醒的话会提前把反应收掉，所以这个时刻必须 ≥ reactionUntil */
+    expect(nextWakeAt(rt)).toBe(rt.reactionUntil);
   });
 
   it('睡着了被点：反应完回到睡着，而不是突然精神起来', function () {

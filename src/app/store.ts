@@ -446,11 +446,15 @@ function initialNotify(): AppState['notify'] {
  * 无头浏览器里点不了"导入角色包"，没有这条路径就**没法验证渲染** ——
  * 而"构建通过 ≠ 运行正常"这个坑我们踩过。生成的 SVG 只有几百字节，
  * 顺带也证明了"一张极小的图也能当角色"。
+ *
+ * 还有一个专门的模式：
+ *   `?mascot=7` —— react 是一段 10 帧 × 5fps = **2 秒**的逐帧动画，
+ *   用来验"被点之后的动画能不能完整播完"（旧代码在 0.9 秒处就把它切掉了）。
  */
 function devMascot(): MascotPack | null {
   let mode = '';
   try { mode = new URLSearchParams(window.location.search).get('mascot') || ''; } catch (e) { return null; }
-  if (mode !== '1' && mode !== '2' && mode !== '3' && mode !== '4' && mode !== '5' && mode !== '6') return null;
+  if (mode !== '1' && mode !== '2' && mode !== '3' && mode !== '4' && mode !== '5' && mode !== '6' && mode !== '7') return null;
 
   const svgUri = function (svg: string): string {
     return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
@@ -515,6 +519,45 @@ function devMascot(): MascotPack | null {
       cols: cols,
       rows: rows,
       fps: 8,
+    };
+  } else if (mode === '7') {
+    /*
+     * 专门用来验"点一下之后的动画完整播完"：
+     * react 是一段 10 帧 × 5fps = **2 秒**的逐帧动画，比旧的 0.9 秒上限长一倍多。
+     * 每帧的瞳孔位置都不一样，于是"播到第几帧"既能从 DOM 上读，也能一眼看出来。
+     */
+    const cols = 5;
+    const rows = 2;
+    const real = 10;
+    let cells = '';
+    for (let i = 0; i < real; i++) {
+      const c = i % cols;
+      const r = Math.floor(i / cols);
+      cells += '<rect x="' + (c * 120 + 10) + '" y="' + (r * 160 + 20) + '" width="100" height="120" rx="26" fill="#2F3237"/>' +
+        '<circle cx="' + (c * 120 + 44) + '" cy="' + (r * 160 + 74 + i * 3) + '" r="9" fill="#fff"/>' +
+        '<circle cx="' + (c * 120 + 76) + '" cy="' + (r * 160 + 74 + i * 3) + '" r="9" fill="#fff"/>' +
+        '<rect x="' + (c * 120 + 46) + '" y="' + (r * 160 + 106 + i) + '" width="28" height="6" rx="3" fill="#fff" opacity=".75"/>';
+    }
+    const reactSheet: { kind: 'sheet'; src: string; cols: number; rows: number; fps: number; frames: number } = {
+      kind: 'sheet',
+      src: svgUri('<svg xmlns="http://www.w3.org/2000/svg" width="' + (cols * 120) + '" height="' + (rows * 160) + '">' + cells + '</svg>'),
+      cols: cols,
+      rows: rows,
+      fps: 5,
+      frames: real,
+    };
+    return {
+      format: 'timetable-mascot',
+      version: 1,
+      id: 'dev-mascot-7',
+      name: '示例角色 7',
+      description: 'react 是一段 2 秒的逐帧动画，用来检查"被点之后的动画能不能完整播完"',
+      height: 140,
+      states: { idle: { kind: 'still', src: still }, react: reactSheet },
+      motion: { breathe: 0.03, bob: 0.02, sway: 2 },
+      interactive: { click: true, drag: true },
+      shadow: true,
+      anchor: { x: 0.5, y: 1 },
     };
   } else if (mode === '6') {
     /*
