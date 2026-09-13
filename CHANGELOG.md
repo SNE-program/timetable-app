@@ -104,7 +104,11 @@ GET /rest/v1/mascots?select=id,name,share_code   → 200 [{"name":"黍","share_c
 
 **⑧ 交付**
 
-构建完成后补：APK 体积 / SHA-256。
+- 版本：**1.9.7 / versionCode 68**；单测 605 通过 / 35 个文件；`tsc --noEmit` 0 错误
+- APK：**9,711,411 字节**，SHA-256 `D7F7B48E9F85E9A274C165E62A1A39D52833380F6A1F40B96C01F4B27D11D77F`
+  （Supabase 主地址与 GitHub 备选逐个下载核对，两份逐字节一致）
+- CI 全绿（含"核对安装包里有没有云端配置"与"校验签名"两步）
+- 服务端：`supabase/schema-mascot-share-lock.sql` 已应用到线上项目，并用 anon key 复验（读 share_code 返回 401）
 
 ---
 ## v1.9.6
