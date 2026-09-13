@@ -29,8 +29,8 @@ import { extractAssets, hydrateAssets } from '../storage/assetRef';
 import { activeCommands, activeExports, resetPlugins, type ActiveCommand, type ActiveExport } from '../plugins/host';
 import { reloadPluginCommands } from './builtinCommands';
 import {
-  courseRows, currentWeek, exportFileName, termRows, toCsv, toGroupedMarkdown, toMarkdown, weekRows,
-  type ExportColumn,
+  FORMAT_EXT, courseRows, currentWeek, exportFileName, renderExport, rowsForScope, termRows, toGroupedMarkdown,
+  toMarkdown, weekRows, type ExportColumn,
 } from '../core/exporters';
 import {
   peekUndo, popRedo, popUndo, pushRedo, pushUndo, recentChanges, recordChange, redoBriefs, redoSize,
@@ -3066,37 +3066,35 @@ export async function runPluginExport(pluginId: string, capabilityId: string): P
   const cap = hit.capability;
   try {
     const termName = state.data.term.name || '我的课表';
-    let text = '';
-    let ext = cap.format === 'csv' ? '.csv' : '.md';
-    let base = termName;
-
-    if (cap.scope === 'week') {
-      const w = state.week;
-      const rows = weekRows(state.data, w, cap.columns);
-      text = cap.format === 'csv' ? toCsv(rows, cap.columns) : toMarkdown(rows, cap.columns, termName + ' 第 ' + w + ' 周');
-      base = termName + '-第' + w + '周';
-      if (rows.length === 0) { showToast('这一周没有课，导出的是空表', 'warn'); }
-    } else if (cap.scope === 'term') {
-      const rows = termRows(state.data, cap.columns);
-      text = cap.format === 'csv' ? toCsv(rows, cap.columns) : toMarkdown(rows, cap.columns, termName);
-      base = termName + '-整学期';
-      if (rows.length === 0) { showToast('课表还是空的，导出的是空表', 'warn'); }
-    } else {
-      const rows = courseRows(state.data);
-      text = cap.format === 'csv'
-        ? toCsv(rows, cap.columns)
-        : (cap.grouped ? toGroupedMarkdown(state.data) : toMarkdown(rows, cap.columns, termName + ' 课程清单'));
-      base = termName + '-课程清单';
-      if (rows.length === 0) { showToast('还没有课程，导出的是空表', 'warn'); }
-    }
+    /*
+     * 范围 → 行、行 + 格式 → 文本，全部交给 core/exporters 的**同一个入口**。
+     * 以前这里是一串 if/else 手写每种组合（csv / markdown 各一份），
+     * 于是每加一种范围或格式就要改三处，而"插件导出的"和"内置导出的"也容易走偏。
+     */
+    const rows = rowsForScope(state.data, cap.scope, cap.columns, state.week);
+    const scopeTitle = cap.scope === 'week' ? termName + ' 第 ' + state.week + ' 周'
+      : cap.scope === 'day' ? termName + ' · 今天'
+        : cap.scope === 'courses' ? termName + ' 课程清单'
+          : cap.scope === 'tasks' ? termName + ' · 任务清单'
+            : cap.scope === 'attendance' ? termName + ' · 出勤记录'
+              : termName;
+    /* 课程清单 + markdown + grouped：按课程分小节的版式更好读 */
+    const text = (cap.scope === 'courses' && cap.format === 'markdown' && cap.grouped)
+      ? toGroupedMarkdown(state.data)
+      : renderExport(rows, cap.columns, cap.format, scopeTitle);
+    const ext = FORMAT_EXT[cap.format];
+    const mime = cap.format === 'csv' ? 'text/csv;charset=utf-8'
+      : cap.format === 'json' ? 'application/json;charset=utf-8'
+        : 'text/plain;charset=utf-8';
+    const base = cap.fileName || (termName + (cap.scope === 'week' ? '-第' + state.week + '周' : ''));
 
     setState({ exportSheet: false });
-    const r = await saveText(
-      text,
-      exportFileName(base, ext),
-      cap.format === 'csv' ? 'text/csv;charset=utf-8' : 'text/markdown;charset=utf-8',
-      '课表助手导出 · ' + cap.name
-    );
+    if (rows.length === 0) {
+      showToast(cap.scope === 'tasks' ? '还没有任务，导出的是空表'
+        : cap.scope === 'attendance' ? '还没有考勤记录，导出的是空表'
+          : '没有可以导出的内容，导出的是空表', 'warn');
+    }
+    const r = await saveText(text, exportFileName(base, ext), mime, '课表助手导出 · ' + cap.name);
     toastSave(r, '「' + cap.name + '」');
   } catch (e) {
     showToast('导出失败：' + (e as Error).message, 'error');

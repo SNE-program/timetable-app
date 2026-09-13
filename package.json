@@ -2,7 +2,7 @@
   "name": "timetable-app",
   "description": "课表助手 —— 本地优先的大学课表与上课提醒（Android）",
   "private": true,
-  "version": "1.9.7",
+  "version": "1.9.8",
   "type": "module",
   "scripts": {
     "dev": "vite",

@@ -42,18 +42,34 @@ export interface ExportCapability {
   name: string;
   /** 在界面上给用户的一句话说明 */
   hint?: string;
-  format: 'csv' | 'markdown';
+  /**
+   * 输出格式：
+   *   csv      Excel / 表格（带 BOM，Excel 打开不乱码）
+   *   markdown 表格，适合笔记软件
+   *   json     自描述（列 id + 中文标签 + 行），适合再加工
+   *   text     一行一条的纯文本，适合直接粘进聊天
+   */
+  format: 'csv' | 'markdown' | 'json' | 'text';
   /**
    * 导出范围：
-   *   week    当前周
-   *   term    整个学期（按周逐周展开）
-   *   courses 课程清单（按课程去重）
+   *   week       某一周（默认当前周）
+   *   day        今天
+   *   term       整个学期（按周逐周展开）
+   *   courses    课程清单（按课程去重）
+   *   tasks      任务 / DDL 清单
+   *   attendance 出勤记录
+   *
+   * 每个范围认识哪些列见 core/exporters.ts 的 SCOPE_COLUMNS；
+   * 安装时会校验"这个范围里这些列有没有意义"，没意义的组合直接拒 ——
+   * 比装上去导出一堆空列要好查得多。
    */
-  scope: 'week' | 'term' | 'courses';
+  scope: 'week' | 'day' | 'term' | 'courses' | 'tasks' | 'attendance';
   /** 列，顺序就是输出顺序 */
   columns: ExportColumn[];
   /** markdown + courses 时，是否按课程分小节（比表格更好读） */
   grouped?: boolean;
+  /** 导出文件的文件名（不含扩展名）；不写就用应用的默认名字 */
+  fileName?: string;
 }
 
 export interface CommandCapability {

@@ -8,6 +8,12 @@ import {
 import { PERMISSION_LABEL, type InstalledPlugin, type PluginPermission } from '../plugins/types';
 import { APP_VERSION } from '../app/version';
 import { reloadPluginCommands } from '../app/builtinCommands';
+import { SCOPE_LABEL } from '../core/exporters';
+
+/** 格式的中文名（插件面板上显示用） */
+const FORMAT_LABEL: Record<string, string> = {
+  csv: 'CSV 表格', markdown: 'Markdown', json: 'JSON', text: '纯文本',
+};
 
 /**
  * 插件管理。
@@ -138,7 +144,14 @@ export default function PluginsPanel() {
 
             <div className="plugin-caps">
               {p.manifest.capabilities.map(function (c) {
-                return <span className="chip" key={c.id}>{c.type === 'export' ? (c.format === 'csv' ? 'CSV' : 'Markdown') + ' · ' + c.name : c.name}</span>;
+                /*
+                 * 能力的标签要把"导出什么、导成什么"说全：
+                 * 只看名字（"导出本周"）看不出它是 CSV 还是 JSON、是课表还是任务清单。
+                 */
+                if (c.type !== 'export') return <span className="chip" key={c.id}>命令 · {c.name}</span>;
+                const fmt = FORMAT_LABEL[c.format] || c.format;
+                const scope = SCOPE_LABEL[c.scope] || c.scope;
+                return <span className="chip" key={c.id}>{fmt} · {scope} · {c.name}</span>;
               })}
             </div>
 

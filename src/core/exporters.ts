@@ -1,5 +1,5 @@
 import type { ConcreteEvent, Course, ISODate, Session, TimetableData } from './types';
-import { expandWeek, shortDateLabel, todayISO, weekOfDate } from './engine';
+import { expandDay, expandWeek, shortDateLabel, todayISO, weekOfDate } from './engine';
 
 /**
  * 导出格式生成器。
@@ -9,14 +9,26 @@ import { expandWeek, shortDateLabel, todayISO, weekOfDate } from './engine';
  * 这样插件永远是声明式的（不需要执行第三方代码），而生成逻辑可以被单测锁死。
  */
 
+/**
+ * 可导出的列。
+ *
+ * 分三组，对应三种数据（见 SCOPE_COLUMNS）：
+ *   课表：date / weekday / week / period / start / end / course / teacher / location / building / note
+ *   任务：task / due / done / course / note
+ *   出勤：date / course / status / note
+ *
+ * 不同数据共用一个列名空间（`course`、`note` 都有意义），各 scope 只填自己认识的那些。
+ */
 export type ExportColumn =
   | 'date' | 'weekday' | 'week' | 'period' | 'start' | 'end'
-  | 'course' | 'teacher' | 'location' | 'building' | 'note';
+  | 'course' | 'teacher' | 'location' | 'building' | 'note'
+  | 'task' | 'due' | 'done' | 'status';
 
 export const COLUMN_LABEL: Record<ExportColumn, string> = {
   date: '日期', weekday: '星期', week: '周次', period: '节次',
   start: '开始', end: '结束', course: '课程', teacher: '教师',
   location: '教室', building: '教学楼', note: '备注',
+  task: '任务', due: '截止', done: '状态', status: '考勤',
 };
 
 const WEEKDAY_CN = ['一', '二', '三', '四', '五', '六', '日'];
@@ -25,7 +37,7 @@ export interface ExportRow {
   [key: string]: string;
 }
 
-/** 把一次具体上课展开成一行 */
+/** 把一次具体上课展开成一行。任务/考勤那几列在课表里没有对应值，留空 */
 export function eventToRow(e: ConcreteEvent, week: number, cols: ExportColumn[]): ExportRow {
   const all: Record<ExportColumn, string> = {
     date: e.date,
@@ -39,6 +51,8 @@ export function eventToRow(e: ConcreteEvent, week: number, cols: ExportColumn[])
     location: e.location || '',
     building: e.building || '',
     note: e.kind === 'lab' ? '实验' : e.kind === 'exam' ? '考试' : e.kind === 'pe' ? '体育' : '',
+    /* 下面四列属于任务 / 考勤数据，课表里没有它们的值 */
+    task: '', due: '', done: '', status: '',
   };
   const row: ExportRow = {};
   for (const c of cols) row[c] = all[c];
@@ -145,6 +159,136 @@ export function exportFileName(base: string, ext: string): string {
 /** 当前周次，导出入口常用 */
 export function currentWeek(data: TimetableData): number {
   return weekOfDate(data.term, todayISO());
+}
+
+/* ------------------------------ 任务与出勤 ------------------------------ */
+
+/** 任务 / DDL 清单：一行一项 */
+export function taskRows(data: TimetableData, cols: ExportColumn[]): ExportRow[] {
+  const courseName = function (id: string | undefined): string {
+    if (!id) return '';
+    const c = data.courses.filter(function (x) { return x.id === id; })[0];
+    return c ? c.name : '';
+  };
+  return data.tasks.map(function (t) {
+    const all: Record<string, string> = {
+      task: t.title || '',
+      due: t.due ? t.due + (t.dueMinutes !== undefined ? ' ' + minutesToClock(t.dueMinutes) : '') : '',
+      done: t.done ? '已完成' : '未完成',
+      course: courseName(t.courseId),
+      note: t.note || '',
+    };
+    const row: ExportRow = {};
+    for (const c of cols) row[c] = all[c] || '';
+    return row;
+  });
+}
+
+/** 出勤记录：一次打卡一行 */
+export function attendanceRows(data: TimetableData, cols: ExportColumn[]): ExportRow[] {
+  const STATUS: Record<string, string> = { present: '到课', late: '迟到', absent: '缺勤', leave: '请假' };
+  const courseName = function (id: string): string {
+    const c = data.courses.filter(function (x) { return x.id === id; })[0];
+    return c ? c.name : '';
+  };
+  const sessionCourse = function (sessionId: string): string {
+    const s = data.sessions.filter(function (x) { return x.id === sessionId; })[0];
+    return s ? courseName(s.courseId) : '';
+  };
+  return data.attendance.map(function (a) {
+    const all: Record<string, string> = {
+      date: a.date,
+      course: sessionCourse(a.sessionId),
+      status: STATUS[a.status] || String(a.status),
+      note: a.note || '',
+    };
+    const row: ExportRow = {};
+    for (const c of cols) row[c] = all[c] || '';
+    return row;
+  });
+}
+
+function minutesToClock(m: number): string {
+  const h = Math.floor(m / 60);
+  const mm = m % 60;
+  return (h < 10 ? '0' : '') + h + ':' + (mm < 10 ? '0' : '') + mm;
+}
+
+/* ------------------------------ 范围 → 行 ------------------------------ */
+
+export type ExportScope = 'week' | 'term' | 'courses' | 'day' | 'tasks' | 'attendance';
+
+/**
+ * 每个范围认识哪些列。
+ *
+ * 用途有两个：插件清单在**安装时**就能查出"给任务导出选教室列"这种没意义的组合；
+ * 界面上的说明也能直接列出每种范围支持哪些列。
+ */
+export const SCOPE_COLUMNS: Record<ExportScope, ExportColumn[]> = {
+  week: ['date', 'weekday', 'week', 'period', 'start', 'end', 'course', 'teacher', 'location', 'building', 'note'],
+  term: ['date', 'weekday', 'week', 'period', 'start', 'end', 'course', 'teacher', 'location', 'building', 'note'],
+  day: ['date', 'weekday', 'week', 'period', 'start', 'end', 'course', 'teacher', 'location', 'building', 'note'],
+  courses: ['course', 'teacher', 'location', 'period', 'note'],
+  tasks: ['task', 'due', 'done', 'course', 'note'],
+  attendance: ['date', 'course', 'status', 'note'],
+};
+
+/** 按范围取行。所有导出路径都走这里，插件与内置导出因此不会有两套行为 */
+export function rowsForScope(data: TimetableData, scope: ExportScope, cols: ExportColumn[], week?: number): ExportRow[] {
+  switch (scope) {
+    case 'day': {
+      const date = todayISO();
+      const w = weekOfDate(data.term, date);
+      return expandDay(data, date).map(function (e) { return eventToRow(e, w, cols); });
+    }
+    case 'week': return weekRows(data, week === undefined ? currentWeek(data) : week, cols);
+    case 'term': return termRows(data, cols);
+    case 'courses': return courseRows(data).map(function (r) { const o: ExportRow = {}; for (const c of cols) o[c] = r[c] || ''; return o; });
+    case 'tasks': return taskRows(data, cols);
+    case 'attendance': return attendanceRows(data, cols);
+    default: return [];
+  }
+}
+
+/* ------------------------------ 格式 ------------------------------ */
+
+export type ExportFormat = 'csv' | 'markdown' | 'json' | 'text';
+
+export const FORMAT_EXT: Record<ExportFormat, string> = {
+  csv: '.csv', markdown: '.md', json: '.json', text: '.txt',
+};
+
+/** 范围的中文名（界面上显示用：插件面板与导出弹层都读它） */
+export const SCOPE_LABEL: Record<ExportScope, string> = {
+  week: '某一周', day: '今天', term: '整学期', courses: '课程清单', tasks: '任务清单', attendance: '出勤记录',
+};
+
+/** JSON：自描述（带列 id 与中文标签），既好解析也看得懂 */
+export function toJson(rows: ExportRow[], cols: ExportColumn[], title?: string): string {
+  return JSON.stringify({
+    title: title || undefined,
+    columns: cols.map(function (c) { return { id: c, label: COLUMN_LABEL[c] }; }),
+    rows: rows,
+  }, null, 2) + '\n';
+}
+
+/** 纯文本：一行一条、字段用「标签 值」列出 —— 适合直接粘进聊天或备忘录 */
+export function toText(rows: ExportRow[], cols: ExportColumn[], title?: string): string {
+  const lines: string[] = [];
+  if (title) lines.push(title, '');
+  rows.forEach(function (r, i) {
+    lines.push((i + 1) + '. ' + cols.map(function (c) { return COLUMN_LABEL[c] + ' ' + (r[c] || '—'); }).join(' · '));
+  });
+  if (rows.length === 0) lines.push('（没有内容）');
+  return lines.join('\n') + '\n';
+}
+
+/** 一份渲染入口：格式再多，调用方也只有这一个分支点 */
+export function renderExport(rows: ExportRow[], cols: ExportColumn[], format: ExportFormat, title?: string): string {
+  if (format === 'csv') return toCsv(rows, cols);
+  if (format === 'json') return toJson(rows, cols, title);
+  if (format === 'text') return toText(rows, cols, title);
+  return toMarkdown(rows, cols, title);
 }
 
 export type { ISODate };

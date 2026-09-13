@@ -14,6 +14,7 @@ import { courseColor, resolvePalette } from '../theme/palette';
 import { resolveDark, type Theme } from '../theme/tokens';
 import { useCourseMap, useMinuteClock } from './useMinuteClock';
 import { DateField } from './common';
+import { fitCardMeta } from './cardFit';
 import { Icon } from './icons';
 import { countRender } from '../app/renderCount';
 
@@ -75,6 +76,8 @@ function eventStyle(e: ConcreteEvent, course: Course | undefined, theme: Theme, 
 
 function EventCard(props: {
   e: ConcreteEvent; course: Course | undefined; theme: Theme; palette: string[]; dark: boolean; days: number;
+  /** 一列（一天）的宽度，用来判断卡片里放得下哪几行 */
+  colW: number;
   /**
    * 手势交给外面：周视图那边才知道网格几何（一天多宽、一节多高），
    * 卡片只报告"按下 / 移动 / 松手"三件事，不自己算坐标。
@@ -88,6 +91,10 @@ function EventCard(props: {
   const hasImage = !!(course && course.image && props.theme.cardStyle !== 'outline');
   const style = eventStyle(e, course, props.theme, props.palette, props.dark, props.days);
   const cls = 'ev' + (hasImage ? ' has-image' : '');
+  /* 卡片上的辅助行按 10px 估算（与 CSS 里的字号一致） */
+  const meta = React.useMemo(function () {
+    return fitCardMeta(e, props.colW, 10);
+  }, [e, props.colW]);
   /* 屏幕阅读器没法"看"卡片长什么样，一句话把它说全：课程、第几节、时间、地点、教师 */
   const cardLabel = e.title
     + '，第 ' + e.periodStart + (e.periodEnd !== e.periodStart ? '-' + e.periodEnd : '') + ' 节'
@@ -214,8 +221,13 @@ function EventCard(props: {
       {hasImage ? <div className="ev-veil" /> : null}
       <div className="ev-body">
         <div className="ev-name">{e.title}</div>
-        {e.location ? <div className="ev-room">{e.location}</div> : null}
-        {props.theme.showTeacher && e.teacher ? <div className="ev-teacher">{e.teacher}</div> : null}
+        {/*
+         * 教室与教师：**按可用宽度决定放不放、放全名还是短名**（见 cardFit.ts）。
+         * 窄到放不下就整行不显示 —— 那比"实…"或者"实验／楼"这种碎片有用得多：
+         * 教室在课程详情、今日页和小组件上都看得到，课表卡上优先保证课名清楚。
+         */}
+        {meta.room.text ? <div className="ev-room">{meta.room.text}</div> : null}
+        {props.theme.showTeacher && meta.teacher.text ? <div className="ev-teacher">{meta.teacher.text}</div> : null}
       </div>
       {e.modifiedBy ? <div className="ev-flag">已调</div> : null}
     </div>
@@ -428,19 +440,27 @@ export default function WeekView() {
     }
   }
 
-  const scrollRef = React.useRef<HTMLDivElement>(null);
   const touch = React.useRef<{ x: number; y: number } | null>(null);
+  /** 一列（一天）实际有多少像素 —— 卡片内部据此决定显示什么，见 cardFit.ts */
+  const [colW, setColW] = React.useState(0);
 
-  /**
-   * 课表现在能不能横向滚。
-   *
-   * 能滚的时候，横滑是"看后面的天"；不能滚（比如只显示 5 天、屏幕够宽）时，
-   * 横滑仍然是原来的"翻周"。两种手势不会打架 —— 用户不需要记两套规则。
+  /*
+   * 量一天的宽度：ResizeObserver 而不是 window.resize ——
+   * 侧栏折叠、弹层挤压这类"窗口没变但容器变了"的情况也要跟着重排。
    */
-  function canScrollX(): boolean {
-    const el = scrollRef.current;
-    return !!el && el.scrollWidth > el.clientWidth + 4;
-  }
+  React.useEffect(function () {
+    function measure(): void {
+      const el = daysRef.current;
+      if (!el) return;
+      setColW(el.clientWidth / Math.max(1, days));
+    }
+    measure();
+    const el = daysRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return function () { ro.disconnect(); };
+  }, [days]);
   function onDown(ev: React.PointerEvent) {
     /* 从课程卡、按钮、输入框上开始的拖动多半不是想翻周，忽略掉 */
     const t = ev.target as HTMLElement;
@@ -454,7 +474,6 @@ export default function WeekView() {
     const t0 = touch.current;
     touch.current = null;
     if (!t0) return;
-    if (canScrollX()) return;   /* 能横滚时这一下是"看后面的天"，不翻周 */
     const dx = ev.clientX - t0.x;
     const dy = ev.clientY - t0.y;
     if (Math.abs(dx) > 72 && Math.abs(dy) < 40) {
@@ -514,15 +533,12 @@ export default function WeekView() {
       ) : null}
 
       {/*
-       * 课表主体放进一个**可以横向滚动**的容器。
+       * 课表主体**铺满屏幕**（不横向滚动）。
        *
-       * 以前它永远压成屏幕那么宽：一周排 7 天上，360px 的手机里每列只有 30 多像素 ——
-       * 课程名被迫折成三行、教室名被省略号吃掉（"实验楼 C101" 只剩"实…"）。
-       * 现在给每天一个**最小可读宽度**（--col-min），放不下就横向滚：
-       * 宁可多滑一下，也不要让每一张卡上的字都被截断。
+       * 1.9.7 曾经让它横向滚动来解决窄列截字，但那样一周 7 天时右边两天被推到屏幕外、
+       * 横滑也从"翻周"变成"看后面的天" —— 主界面的手感反而变差了（用户反馈）。
+       * 现在的做法：布局改回来，改在**卡片内部**按可用宽度决定显示什么（见 EventCard 的 fitText）。
        */}
-      <div className="week-scroll-x" ref={scrollRef}>
-      <div className="week-inner" style={{ ['--cols' as string]: String(days) } as React.CSSProperties}>
       <div className="week-head">
         <button className="axis-spacer" onClick={openScheme} title="点这里修改每节课的上课时间"><Icon name="settings" size={13} /></button>
         <div className="days-head">
@@ -578,7 +594,7 @@ export default function WeekView() {
             return (
               <EventCard
                 key={e.key} e={e} course={courseById.get(e.courseId)} theme={theme} palette={palette}
-                dark={dark} days={days}
+                dark={dark} days={days} colW={colW}
                 onGrabStart={grabStart} onGrabMove={grabMove} onGrabEnd={grabEnd}
               />
             );
@@ -609,8 +625,6 @@ export default function WeekView() {
             />
           ) : null}
         </div>
-      </div>
-      </div>
       </div>
       {events.length > 0 ? (
         <div className="stat-row">

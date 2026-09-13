@@ -2,7 +2,7 @@ import {
   CAPABILITY_PERMISSION, type Capability, type CommandCapability, type ExportCapability,
   type InstalledPlugin, type PluginManifest, type PluginPermission,
 } from './types';
-import { COLUMN_LABEL, type ExportColumn } from '../core/exporters';
+import { COLUMN_LABEL, SCOPE_COLUMNS, type ExportColumn, type ExportFormat, type ExportScope } from '../core/exporters';
 import { BUILTIN_PLUGINS } from './builtin';
 
 /**
@@ -79,7 +79,8 @@ function save(s: Stored): void {
 /* ------------------------------ 清单校验 ------------------------------ */
 
 const VALID_COLUMNS = Object.keys(COLUMN_LABEL) as ExportColumn[];
-const VALID_SCOPES = ['week', 'term', 'courses'];
+const VALID_SCOPES: ExportScope[] = ['week', 'day', 'term', 'courses', 'tasks', 'attendance'];
+const VALID_FORMATS: ExportFormat[] = ['csv', 'markdown', 'json', 'text'];
 
 export type ParseResult =
   | { ok: true; manifest: PluginManifest }
@@ -183,18 +184,31 @@ export function validateManifest(raw: unknown): ParseResult {
       continue;
     }
 
-    if (cap.format !== 'csv' && cap.format !== 'markdown') {
-      return { ok: false, error: '能力 ' + cap.id + ' 的 format 只能是 csv 或 markdown' };
+    if (typeof cap.format !== 'string' || VALID_FORMATS.indexOf(cap.format as ExportFormat) < 0) {
+      return { ok: false, error: '能力 ' + cap.id + ' 的 format 只能是 ' + VALID_FORMATS.join(' / ') };
     }
-    if (typeof cap.scope !== 'string' || VALID_SCOPES.indexOf(cap.scope) < 0) {
-      return { ok: false, error: '能力 ' + cap.id + ' 的 scope 只能是 week / term / courses' };
+    if (typeof cap.scope !== 'string' || VALID_SCOPES.indexOf(cap.scope as ExportScope) < 0) {
+      return { ok: false, error: '能力 ' + cap.id + ' 的 scope 只能是 ' + VALID_SCOPES.join(' / ') };
     }
+    /*
+     * 列必须在这个范围里有意义。
+     *
+     * 以前只校验"列名认不认识"，于是能写出"导出任务清单、列选教室"这种清单 ——
+     * 装上之后导出的是一整列空白，用户只会觉得"这插件坏了"。现在安装时就拒。
+     */
+    const allowed = SCOPE_COLUMNS[cap.scope as ExportScope] || [];
     const cols = Array.isArray(cap.columns) ? cap.columns : [];
     if (cols.length === 0) return { ok: false, error: '能力 ' + cap.id + ' 至少要指定一列' };
     if (cols.length > 12) return { ok: false, error: '能力 ' + cap.id + ' 的列数上限是 12' };
     for (const col of cols) {
       if (VALID_COLUMNS.indexOf(col as ExportColumn) < 0) {
         return { ok: false, error: '能力 ' + cap.id + ' 里有不认识的列：' + String(col) };
+      }
+      if (allowed.indexOf(col as ExportColumn) < 0) {
+        return {
+          ok: false,
+          error: '能力 ' + cap.id + ' 是「' + cap.scope + '」范围，没有「' + String(col) + '」这一列（可用：' + allowed.join(' / ') + '）',
+        };
       }
     }
     /* 该能力需要的权限必须已经在 permissions 里声明 —— 不允许"偷偷要用" */
@@ -207,8 +221,9 @@ export function validateManifest(raw: unknown): ParseResult {
       id: cap.id,
       name: cap.name,
       hint: typeof cap.hint === 'string' ? cap.hint : undefined,
-      format: cap.format,
+      format: cap.format as ExportFormat,
       scope: cap.scope as ExportCapability['scope'],
+      fileName: typeof cap.fileName === 'string' && cap.fileName.trim() ? cap.fileName.trim().slice(0, 60) : undefined,
       columns: cols as ExportColumn[],
       grouped: cap.grouped === true,
     });

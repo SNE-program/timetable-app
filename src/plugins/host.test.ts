@@ -331,3 +331,61 @@ describe('命令能力', function () {
     expect(activeCommands().some(function (c) { return c.pluginId === 'test.cmd'; })).toBe(false);
   });
 });
+/* =========================== v1.9.8：更大的自由度 =========================== */
+
+/*
+ * 这一批用例对应"插件还能自由到什么程度"这件事的答案：
+ * 它依然不执行任何代码，但**可声明的范围与格式都变宽了**：
+ *   格式 csv / markdown / json / text；范围 周 / 今天 / 整学期 / 课程 / 任务 / 考勤；
+ *   列也按范围分了三组（课表列、任务列、考勤列）。
+ * 关键是"装不上的组合"要在安装时就被拒 —— 否则用户拿到的是满列空白，只会觉得插件坏了。
+ */
+
+describe('导出范围与格式的扩展', function () {
+  function exportsWith(over: Record<string, unknown>): string {
+    return JSON.stringify({
+      format: 'timetable-plugin', version: 1, id: 'test.wide', name: '宽插件',
+      permissions: ['read:timetable'],
+      capabilities: [Object.assign({
+        type: 'export', id: 'e1', name: '导出', format: 'csv', scope: 'week', columns: ['course'],
+      }, over)],
+    });
+  }
+
+  it('四种格式都收：csv / markdown / json / text', function () {
+    for (const f of ['csv', 'markdown', 'json', 'text']) {
+      expect(parseManifest(exportsWith({ format: f })).ok).toBe(true);
+    }
+    expect(parseManifest(exportsWith({ format: 'xlsx' })).ok).toBe(false);
+  });
+
+  it('六个范围都收：周 / 今天 / 整学期 / 课程 / 任务 / 考勤', function () {
+    expect(parseManifest(exportsWith({ scope: 'day', columns: ['course'] })).ok).toBe(true);
+    expect(parseManifest(exportsWith({ scope: 'tasks', columns: ['task', 'due', 'done'] })).ok).toBe(true);
+    expect(parseManifest(exportsWith({ scope: 'attendance', columns: ['date', 'course', 'status'] })).ok).toBe(true);
+    expect(parseManifest(exportsWith({ scope: 'month', columns: ['course'] })).ok).toBe(false);
+  });
+
+  it('列必须在这个范围里有意义：任务清单选「教室」会被拒，并告诉它能用哪些', function () {
+    const r = parseManifest(exportsWith({ scope: 'tasks', columns: ['task', 'location'] }));
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.error).toContain('location');
+      expect(r.error).toContain('task');   /* 提示里给出可用列，装不上也知道该怎么改 */
+    }
+  });
+
+  it('考勤范围认识 status，课表范围不认识', function () {
+    expect(parseManifest(exportsWith({ scope: 'attendance', columns: ['status'] })).ok).toBe(true);
+    expect(parseManifest(exportsWith({ scope: 'week', columns: ['status'] })).ok).toBe(false);
+  });
+
+  it('可以指定导出文件名（不含扩展名）', function () {
+    const r = parseManifest(exportsWith({ fileName: '我的课表-备份' }));
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      const c = r.manifest.capabilities[0];
+      expect(c.type === 'export' ? c.fileName : '').toBe('我的课表-备份');
+    }
+  });
+});

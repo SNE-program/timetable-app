@@ -1512,3 +1512,40 @@ input[type="range"].rng::-moz-range-thumb { width: 12px; height: 12px; border-ra
   font-size: var(--fs-xs); font-weight: 700; color: var(--c-text-2);
   white-space: nowrap;
 }
+
+/* ------------------------------ 带多个动作的列表项 ------------------------------ */
+/*
+ * 起因是一段用户贴回来的真实渲染结果：
+ *
+ *   凯尔希:·思衡 / 托·已 / 分享 / 使用 / 分享码 / 公开 / 删除 / 6.58MB / ·分 / 享码 / AVRQG97N
+ *
+ * 一行里塞四个按钮（使用 / 分享码 / 公开 / 删除）在 360px 上要占掉 200 多像素，
+ * 留给左边文字的只剩 110px —— 于是名字、状态、体积、分享码全被挤成两三字一行的碎片。
+ *
+ * 所以这类"一条数据 + 好几个动作"的项不能再用 .list-row（它天生是一行两列），
+ * 改成：上面两行是信息，下面一排是动作，动作排不下就换行。
+ */
+.action-item {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 12px 14px; border-bottom: 1px solid var(--c-border);
+}
+.action-item:last-child { border-bottom: 0; }
+.action-item .ai-head { min-width: 0; }
+.action-item .ai-title {
+  font-size: var(--fs-md); font-weight: 600; color: var(--c-text);
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+}
+.action-item .ai-meta {
+  font-size: var(--fs-xs); color: var(--c-text-muted); margin-top: 3px;
+  line-height: 1.5; word-break: break-word;
+}
+/* 分享码这类"整块不能断"的内容：允许它在行尾整体换行，但不许从中间断开 */
+.action-item .ai-code { white-space: nowrap; font-variant-numeric: tabular-nums; letter-spacing: .04em; }
+.action-item .ai-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+/* 标签：公开 / 已分享 */
+.ai-tag {
+  flex: 0 0 auto; padding: 1px 6px; border-radius: var(--r-tag);
+  font-size: 10px; font-weight: 600;
+  background: var(--c-surface-2); color: var(--c-text-muted); border: 1px solid var(--c-border);
+}
+.ai-tag.on { background: var(--c-today); color: var(--c-accent); border-color: var(--c-accent); }

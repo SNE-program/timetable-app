@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
-  courseRows, csvCell, exportFileName, termRows, toCsv, toGroupedMarkdown, toMarkdown, weekRows,
+  FORMAT_EXT, SCOPE_COLUMNS, courseRows, csvCell, exportFileName, renderExport, rowsForScope, termRows, toCsv,
+  toGroupedMarkdown, toJson, toMarkdown, toText, weekRows, type ExportColumn,
 } from './exporters';
 import { buildDemoData, buildEmptyData } from './demo';
+import type { AttendanceRecord, Task, TimetableData } from './types';
 
 describe('导出格式', function () {
   it('CSV 会把逗号、引号、换行包起来并翻倍引号（RFC4180）', function () {
@@ -74,5 +76,77 @@ describe('导出格式', function () {
     const d = buildEmptyData();
     expect(function () { toCsv(weekRows(d, 1, ['date']), ['date']); }).not.toThrow();
     expect(function () { toGroupedMarkdown(d); }).not.toThrow();
+  });
+});
+
+describe('范围 → 行（新增任务与考勤）', function () {
+  function data(over: Record<string, unknown>): TimetableData {
+    return Object.assign(buildEmptyData(), over) as unknown as TimetableData;
+  }
+
+  it('任务清单：一行一项，完成状态说人话，截止时间带上时刻', function () {
+    const tasks: Task[] = [
+      { id: 't1', title: '写实验报告', due: '2026-03-05', dueMinutes: 14 * 60, done: false },
+      { id: 't2', title: '交作业', done: true },
+    ];
+    const rows = rowsForScope(data({ tasks: tasks }), 'tasks', ['task', 'due', 'done']);
+    expect(rows.length).toBe(2);
+    expect(rows[0].task).toBe('写实验报告');
+    expect(rows[0].due).toBe('2026-03-05 14:00');
+    expect(rows[0].done).toBe('未完成');
+    expect(rows[1].done).toBe('已完成');
+  });
+
+  it('出勤记录：状态翻成中文', function () {
+    const att: AttendanceRecord[] = [
+      { id: 'a1', sessionId: 's1', date: '2026-03-02', status: 'late' },
+      { id: 'a2', sessionId: 's1', date: '2026-03-09', status: 'present' },
+    ];
+    const rows = rowsForScope(data({ attendance: att }), 'attendance', ['date', 'status']);
+    expect(rows[0].status).toBe('迟到');
+    expect(rows[1].status).toBe('到课');
+  });
+
+  it('空的课表导出任务 / 考勤不会炸，只是 0 行', function () {
+    expect(rowsForScope(data({}), 'tasks', SCOPE_COLUMNS.tasks).length).toBe(0);
+    expect(rowsForScope(data({}), 'attendance', SCOPE_COLUMNS.attendance).length).toBe(0);
+  });
+});
+
+describe('新增输出格式', function () {
+  const rows = [{ course: '高等数学', teacher: '王老师' }, { course: '英语', teacher: '' }];
+  const cols: ExportColumn[] = ['course', 'teacher'];
+
+  it('JSON 自描述：带列 id 与中文标签，方便再加工', function () {
+    const parsed = JSON.parse(toJson(rows, cols, '标题'));
+    expect(parsed.title).toBe('标题');
+    expect(parsed.columns).toEqual([{ id: 'course', label: '课程' }, { id: 'teacher', label: '教师' }]);
+    expect(parsed.rows[0].course).toBe('高等数学');
+  });
+
+  it('纯文本：一行一条；空值写成破折号（否则看不出是缺了还是为空）', function () {
+    const t = toText(rows, cols);
+    expect(t).toContain('1. 课程 高等数学 · 教师 王老师');
+    expect(t).toContain('2. 课程 英语 · 教师 —');
+  });
+
+  it('没有内容时明说「没有内容」，不返回空字符串', function () {
+    expect(toText([], cols)).toContain('没有内容');
+  });
+
+  it('renderExport 按格式分发，扩展名对得上', function () {
+    expect(renderExport(rows, cols, 'csv').indexOf('课程,教师')).toBeGreaterThan(-1);
+    expect(renderExport(rows, cols, 'markdown')).toContain('| 课程 | 教师 |');
+    expect(renderExport(rows, cols, 'json').indexOf('"columns"')).toBeGreaterThan(-1);
+    expect(renderExport(rows, cols, 'text')).toContain('1. ');
+    expect(FORMAT_EXT.json).toBe('.json');
+    expect(FORMAT_EXT.text).toBe('.txt');
+  });
+
+  it('每个范围认识哪些列是显式声明的，界面与校验都读它', function () {
+    expect(SCOPE_COLUMNS.tasks).toContain('task');
+    expect(SCOPE_COLUMNS.tasks).not.toContain('location');
+    expect(SCOPE_COLUMNS.attendance).toContain('status');
+    expect(SCOPE_COLUMNS.week).toContain('location');
   });
 });

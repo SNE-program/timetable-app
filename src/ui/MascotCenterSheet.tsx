@@ -139,9 +139,10 @@ export default function MascotCenterSheet() {
           ) : lib.map(function (e) {
             const using = !!pack && pack.name === e.name && providedStates(pack).length === providedStates(e.pack).length;
             return (
-              <div className="list-row" key={e.id}>
-                <div><MascotThumb asset={e.pack.states.idle} size={38} /></div>
-                <div style={{ minWidth: 0 }}>
+              <div className="action-item" key={e.id}>
+                <div className="ai-head" style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                <MascotThumb asset={e.pack.states.idle} size={38} />
+                <div style={{ minWidth: 0, flex: '1 1 auto' }}>
                   {renaming === e.id ? (
                     <input
                       className="input" style={{ height: 30 }} autoFocus value={renameText}
@@ -151,10 +152,10 @@ export default function MascotCenterSheet() {
                   ) : (
                     <div className="lr-label">{e.name}{using ? ' · 正在用' : ''}</div>
                   )}
-                  <div className="lr-sub">{e.from || '本机'} · {new Date(e.addedAt).toLocaleDateString()}</div>
+                  <div className="ai-meta">{e.from || '本机'} · {new Date(e.addedAt).toLocaleDateString()}</div>
                 </div>
-                <div className="spacer" />
-                <div className="lr-right" style={{ display: 'flex', gap: 6 }}>
+                </div>
+                <div className="ai-actions">
                   <button className="btn sm primary" disabled={using} onClick={function () { pickLib(e.id); }}>
                     {using ? '使用中' : '用这个'}
                   </button>
@@ -191,13 +192,19 @@ export default function MascotCenterSheet() {
             <div className="list-row"><div className="lr-sub">云端还没有你的角色。到「分享与获取」页可以一键上传并生成分享码。</div></div>
           ) : mine.map(function (m) {
             return (
-              <div className="list-row" key={m.id}>
-                <div style={{ minWidth: 0 }}>
-                  <div className="lr-label">{m.name}{m.share_code ? ' · 已分享' : ''}{m.is_public ? ' · 公开' : ''}</div>
-                  <div className="lr-sub">{describeSize(m.size_bytes)}{m.share_code ? ' · 分享码 ' + m.share_code : ''}</div>
+              <div className="action-item" key={m.id}>
+                <div className="ai-head">
+                  <div className="ai-title">
+                    <span>{m.name}</span>
+                    {m.share_code ? <span className="ai-tag on">已分享</span> : null}
+                    {m.is_public ? <span className="ai-tag on">公开</span> : null}
+                  </div>
+                  <div className="ai-meta">
+                    {describeSize(m.size_bytes)}
+                    {m.share_code ? <span> · 分享码 <b className="ai-code">{m.share_code}</b></span> : null}
+                  </div>
                 </div>
-                <div className="spacer" />
-                <div className="lr-right" style={{ display: 'flex', gap: 6 }}>
+                <div className="ai-actions">
                   <button className="btn sm primary" disabled={busy} onClick={function () { setBusy(true); void cloudUseMascot(m).then(function () { setBusy(false); }); }}>用这个</button>
                   <button className="btn sm ghost" disabled={busy} onClick={function () { void cloudShareMascot(m); }}>{m.share_code ? '分享码' : '分享'}</button>
                   {/*
@@ -322,10 +329,11 @@ export default function MascotCenterSheet() {
               <div className="section-title">最近用过的码</div>
               {codes.map(function (x) {
                 return (
-                  <div className="list-row" key={x}>
-                    <div><div className="lr-label" style={{ letterSpacing: '.12em' }}>{x}</div></div>
-                    <div className="spacer" />
-                    <div className="lr-right" style={{ display: 'flex', gap: 6 }}>
+                  <div className="action-item" key={x}>
+                    <div className="ai-head">
+                      <div className="ai-title"><span className="ai-code" style={{ letterSpacing: '.12em' }}>{x}</span></div>
+                    </div>
+                    <div className="ai-actions">
                       <button className="btn sm" disabled={busy} onClick={function () { setCode(x); }}>填到上面</button>
                       <button className="btn sm ghost" onClick={function () { forgetRecentShareCode(x); setCodes(recentShareCodes()); }}>忘掉</button>
                     </div>

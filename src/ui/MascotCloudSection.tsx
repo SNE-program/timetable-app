@@ -134,19 +134,24 @@ export default function MascotCloudSection() {
         <div className="panel-desc">{c.session ? '云端还没有你的角色。' : '登录之后就能把自己做的角色存到这里。'}</div>
       ) : mine.map(function (m) {
         return (
-          <div className="list-row" key={m.id}>
-            <div>
-              <div className="lr-label">
-                {m.name}
-                {m.share_code ? ' · 已分享' : ''}
-                {m.is_public ? ' · 公开' : ''}
+          /*
+           * 一条数据 + 四个动作，不能用 .list-row（一行两列）：
+           * 360px 上四个按钮要占 200 多像素，左边的名字、体积、分享码会被挤成两三字一行的碎片。
+           * 见 components.css 里 .action-item 的说明（附用户贴回来的实际渲染结果）。
+           */
+          <div className="action-item" key={m.id}>
+            <div className="ai-head">
+              <div className="ai-title">
+                <span>{m.name}</span>
+                {m.share_code ? <span className="ai-tag on">已分享</span> : null}
+                {m.is_public ? <span className="ai-tag on">公开</span> : null}
               </div>
-              <div className="lr-sub">
+              <div className="ai-meta">
                 {describeSize(m.size_bytes)}
-                {m.share_code ? ' · 分享码 ' + m.share_code : ''}
+                {m.share_code ? <span> · 分享码 <b className="ai-code">{m.share_code}</b></span> : null}
               </div>
             </div>
-            <div className="lr-right" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            <div className="ai-actions">
               <button className="btn sm" disabled={busy} onClick={function () { void cloudUseMascot(m); }}>
                 {stage === 'download' ? '下载中' : stage === 'save' ? '保存中' : '使用'}
               </button>
