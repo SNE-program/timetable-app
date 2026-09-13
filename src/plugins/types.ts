@@ -33,7 +33,7 @@ import type { ExportColumn } from '../core/exporters';
  * 没有它，插件就只是导出菜单里的一行字 —— 用户根本感知不到装过什么。
  * 而它仍然是**零代码**的：命令只是把已有动作包一层，插件无法借它执行任何新逻辑。
  */
-export type CapabilityType = 'export' | 'command' | 'settings';
+export type CapabilityType = 'export' | 'command' | 'settings' | 'import';
 
 export interface ExportCapability {
   type: 'export';
@@ -132,7 +132,38 @@ export interface SettingsCapability {
   fields: SettingField[];
 }
 
-export type Capability = ExportCapability | CommandCapability | SettingsCapability;
+/**
+ * 导入预设：**这是哪个学校导出来的表**。
+ *
+ * ## 为什么它是"预设"而不是"写权限"
+ *
+ * 起初的计划里，导入要配一个新权限 `write:timetable`。真做的时候发现不需要：
+ * 插件在这里提供的**只是几个表头写法**（"我们学校的课程名称那一列叫『教学班名称』"），
+ * 文件是用户自己选的、解析与预览是宿主做的、入库要用户点确认、之后还能撤销。
+ * 插件从头到尾没有碰到数据 —— 为这样一件事弹一个写权限，只会让权限页变得像走过场，
+ * 而"每次弹权限都该是真的有事"这条一旦被稀释，真正要紧的权限（读课表、联网）
+ * 用户也会随手点同意。
+ *
+ * 它解决的痛点是真的：教务系统导出的表头五花八门，靠宿主内置的同义词永远追不完。
+ */
+export interface ImportCapability {
+  type: 'import';
+  /** 插件内唯一 */
+  id: string;
+  name: string;
+  hint?: string;
+  /**
+   * 每个字段在这份文件里的**表头写法**（同义词，会与内置同义词一起参与匹配，
+   * 且优先于内置 —— 见 core/courseImport.ts 的 scoreHeader）。
+   */
+  headers: Partial<Record<'name' | 'teacher' | 'day' | 'period' | 'weeks' | 'place', string[]>>;
+  /** 表头固定在第几行（0 基）；不写就让宿主自己找 */
+  headerRow?: number;
+  /** 这份文件是"一行一个时段"，还是"课表矩阵"（行是节次、列是星期） */
+  mode?: 'long' | 'matrix';
+}
+
+export type Capability = ExportCapability | CommandCapability | SettingsCapability | ImportCapability;
 
 export type PluginPermission = 'read:timetable';
 
@@ -151,6 +182,11 @@ export const CAPABILITY_PERMISSION: Partial<Record<CapabilityType, PluginPermiss
   export: 'read:timetable',
   /* 命令目前只能触发导出，读的同样是课表内容 */
   command: 'read:timetable',
+  /*
+   * import 与 settings 都不需要权限：
+   * import 只提供表头写法，文件由用户选、解析与入库由宿主做、预览要用户确认、事后可撤销；
+   * settings 只是插件自己的参数。理由见上面 ImportCapability 的说明。
+   */
 };
 
 export interface PluginManifest {

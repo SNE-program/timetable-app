@@ -843,6 +843,83 @@ function runPluginCheck(): void {
 }
 
 /**
+ * 导入预设的自检（?importcheck=1）。
+ *
+ * 与插件设置的检查同一个思路：**不看代码，只走用户那条路**。
+ * 用内置样例表（?sample=2，一张"别的学校"格式的长表）：
+ *
+ *   1. 预设那一排有没有出现（装了带导入能力的插件才有）；
+ *   2. 点「自动识别」时认出几列、表头在第几行；
+ *   3. 点一个**故意对不上**的预设（?devplugin=import 装的那条）之后，
+ *      表头行与命中列数有没有跟着变 —— 也就是"选错预设会不会被看出来"。
+ *
+ * 第 3 条是这次的重点：预设的价值在于"点一下就全对"，
+ * 但它错了的时候如果界面照旧显示"已对上 6 列"，用户会导进一张错课表。
+ */
+function runImportPresetCheck(): void {
+  let send = function (_text: string): void { /* 默认不回传 */ };
+  try { send = makeReporter(new URLSearchParams(window.location.search).get('report') || ''); } catch (e) { /* 忽略 */ }
+  setTimeout(function () {
+    const row = document.querySelector('.chip-row');
+    if (!row) {
+      send('IMPORTCHECK 没有预设那一排（要用 ?devplugin=import&open=import-sheet&sample=2 才测得到）');
+      return;
+    }
+    const chips = row.querySelectorAll('.chip');
+    const desc = function (): string {
+      const el = document.querySelector('.field .panel-desc');
+      return el ? (el.textContent || '').trim() : '';
+    };
+    /**
+     * 「表头在第几行」那个选择器上显示的文案。
+     *
+     * 不去猜控件的类名（猜错了只会在报告里写一串"?"，看着像失败其实没有），
+     * 而是找到写着"表头"的那个 field，把它整块的文字抠出来当证据。
+     */
+    const headerPick = function (): string {
+      const els = document.querySelectorAll('.field');
+      for (let i = 0; i < els.length; i++) {
+        const label = els[i].querySelector('.field-label');
+        if (label && (label.textContent || '').indexOf('表头') >= 0) {
+          const all = (els[i].textContent || '').replace(/\s+/g, ' ').trim();
+          return all.replace('表头在第几行', '').trim().slice(0, 24);
+        }
+      }
+      return '(没找到)';
+    };
+    const wait = function (ms: number): Promise<void> { return new Promise(function (r) { window.setTimeout(r, ms); }); };
+
+    const run = async function (): Promise<void> {
+      const auto = chips[0] as HTMLElement;
+      const preset = chips[1] as HTMLElement;
+      const beforeHeader = headerPick();
+      const beforeDesc = desc();
+
+      preset.click();
+      await wait(160);
+      const afterHeader = headerPick();
+      const afterDesc = desc();
+
+      auto.click();
+      await wait(160);
+      const backHeader = headerPick();
+
+      const changed = afterHeader !== beforeHeader || afterDesc !== beforeDesc;
+      const restored = backHeader === beforeHeader;
+      const warned = afterDesc.indexOf('只认出了') >= 0 || afterDesc.indexOf('换一个预设') >= 0;
+      send('IMPORTCHECK verdict=' + (changed && restored && warned && chips.length >= 2 ? 'PASS' : 'FAIL')
+        + ' 预设数=' + chips.length
+        + ' 切换后变了=' + (changed ? 'yes' : 'no')
+        + ' 切回自动识别=' + (restored ? 'yes' : 'no')
+        + ' 选错时有提示=' + (warned ? 'yes' : 'no')
+        + ' | 表头行 ' + beforeHeader + ' → ' + afterHeader + ' → ' + backHeader
+        + ' | 文案「' + afterDesc + '」');
+    };
+    run().catch(function (e) { send('IMPORTCHECK 自检自身出错：' + String(e && (e as Error).message || e)); });
+  }, 1600);
+}
+
+/**
  * 小组件尺寸预览的自检（?wp=1）。
  *
  * 那个预览面板只在 **Android 版**渲染（网页版没有桌面小组件），
@@ -1137,6 +1214,7 @@ export function runDiagnostics(): void {
   if (params.get('wp') === '1') runWidgetPreviewCheck();
   if (params.get('dragcheck') === '1') runDragCheck();
   if (params.get('plugcheck') === '1') runPluginCheck();
+  if (params.get('importcheck') === '1') runImportPresetCheck();
   if (params.get('clipcheck') === '1') runClipCheck();
   if (params.get('behavecheck')) {
     const sec = Number(params.get('behavecheck'));

@@ -1,0 +1,39 @@
+{
+  "format": "timetable-plugin",
+  "version": 1,
+  "apiVersion": 2,
+  "id": "example.jwc-import",
+  "name": "教务系统导入预设（示例）",
+  "author": "示例",
+  "pluginVersion": "1.0.0",
+  "description": "把一所学校教务系统的表头写法写下来：导入弹层里选中它，就不用每次手动对列了。表头名字换成你们学校的即可。",
+  "permissions": [],
+  "capabilities": [
+    {
+      "type": "import",
+      "id": "long-csv",
+      "name": "某校教务（一行一个时段）",
+      "hint": "课程名称 / 任课教师 / 上课星期 / 起止节次 / 起止周 / 上课地点",
+      "headers": {
+        "name": ["课程名称", "教学班名称"],
+        "teacher": ["任课教师", "授课教师"],
+        "day": ["上课星期", "星期几"],
+        "period": ["起止节次", "上课节次"],
+        "weeks": ["起止周", "上课周次"],
+        "place": ["上课地点", "上课教室"]
+      }
+    },
+    {
+      "type": "import",
+      "id": "matrix-xls",
+      "name": "某校教务（课表矩阵）",
+      "hint": "行是节次、列是星期，格子里写着课程名与教室",
+      "mode": "matrix",
+      "headerRow": 1,
+      "headers": {
+        "name": ["课程名称"],
+        "place": ["上课地点"]
+      }
+    }
+  ]
+}

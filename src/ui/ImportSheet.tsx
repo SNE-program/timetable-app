@@ -6,6 +6,7 @@ import {
   type ColumnMap, type FieldKey, type MatrixGuess, type ParseOutcome,
 } from '../core/courseImport';
 import { describeWeeks } from '../core/engine';
+import { activeImports } from '../plugins/host';
 import { Panel, Picker, Segmented, Sheet } from './common';
 
 /**
@@ -79,7 +80,11 @@ export default function ImportSheet() {
   const [map, setMap] = React.useState<ColumnMap>(emptyMap);
   const [matrix, setMatrix] = React.useState<MatrixGuess | null>(null);
   const [importMode, setImportMode] = React.useState<'merge' | 'replace'>('merge');
+  const [presetId, setPresetId] = React.useState('');
+  /** 预设认出了几个字段（''= 没选预设） */
+  const [presetHits, setPresetHits] = React.useState(-1);
   const fileRef = React.useRef<HTMLInputElement>(null);
+  const presets = React.useMemo(function () { return activeImports(); }, []);
 
   const table = tables[tableIdx];
   const rows = table ? table.rows : [];
@@ -107,17 +112,32 @@ export default function ImportSheet() {
     return parseSheet(rows, headerRow, map);
   }, [step, mode, rows, headerRow, map, matrix]);
 
-  function adoptTable(list: SheetTable[], idx: number): void {
-    const t = list[idx];
-    const g = t ? guessColumns(t.rows) : null;
-    const m = t ? detectMatrix(t.rows) : null;
-
-    setTableIdx(idx);
-    setHeaderRow(g ? g.headerRow : -1);
-    setMap(g ? g.map : emptyMap());
+  /**
+   * 按当前选中的**插件预设**重新认一次列。
+   *
+   * 预设只提供"这份文件里表头怎么写"（同义词）与表头在第几行 ——
+   * 解析、预览、入库仍然是宿主那一条路，插件不碰数据。
+   */
+  function applyPreset(presetId: string, list?: SheetTable[], idx?: number): void {
+    const tables2 = list || tables;
+    const i = idx === undefined ? tableIdx : idx;
+    const t = tables2[i];
+    if (!t) return;
+    const preset = presetId ? activeImports().filter(function (x) { return x.pluginId + ':' + x.capability.id === presetId; })[0] : null;
+    setPresetId(presetId);
+    const cap = preset ? preset.capability : null;
+    const g = guessColumns(t.rows, cap ? cap.headers : undefined, cap ? cap.headerRow : undefined);
+    setHeaderRow(g.headerRow);
+    setMap(g.map);
+    const m = cap && cap.mode === 'matrix' ? (detectMatrix(t.rows) || null) : detectMatrix(t.rows);
     setMatrix(m);
-    /* 长表认不出列、却认得出矩阵时，直接按矩阵走 —— 少让用户点一次 */
-    setMode(g && g.hits >= 2 ? 'long' : (m ? 'matrix' : 'long'));
+    setMode(cap ? (cap.mode || (g.hits >= 2 ? 'long' : 'matrix')) : (g.hits >= 2 ? 'long' : (m ? 'matrix' : 'long')));
+    /* 命中几个字段要当场告诉用户：预设不对时他会立刻看到"只认出了 1 列" */
+    setPresetHits(g.hits);
+  }
+
+  function adoptTable(list: SheetTable[], idx: number): void {
+    applyPreset('', list, idx);
   }
 
   async function pick(file: File): Promise<void> {
@@ -224,6 +244,46 @@ export default function ImportSheet() {
           读到 {rows.length} 行 · 编码 {encoding}
           {tables.length > 1 ? ' · ' + tables.length + ' 个工作表' : ''}
         </div>
+
+        {/*
+           * 插件预设：这是哪个学校导出来的表。
+           *
+           * 放在最上面，因为它是"一次点掉一整轮对列"的东西 —— 用户在教务系统里
+           * 下载的那张表，表头叫什么、在第几行，插件已经写好了。
+           * 没装任何带导入能力的插件时这一块**整个不出现**（不占位置、不多一个空标题）。
+         */}
+        {presets.length > 0 ? (
+          <div className="field">
+            <div className="field-label">这是哪个学校导出来的表</div>
+            <div className="chip-row" style={{ padding: 0 }}>
+              <span
+                className={presetId === '' ? 'chip on' : 'chip'}
+                role="button"
+                tabIndex={0}
+                onClick={function () { applyPreset(''); }}
+              >自动识别</span>
+              {presets.map(function (pr) {
+                const key = pr.pluginId + ':' + pr.capability.id;
+                return (
+                  <span
+                    className={presetId === key ? 'chip on' : 'chip'}
+                    key={key}
+                    role="button"
+                    tabIndex={0}
+                    onClick={function () { applyPreset(key); }}
+                  >{pr.capability.name}</span>
+                );
+              })}
+            </div>
+            <div className="panel-desc" style={{ paddingTop: 6 }}>
+              {presetId === ''
+                ? '选一个预设，会按那份文件的表头写法自动对上列；对完之后仍然可以手动改。'
+                : (presetHits >= 3
+                  ? '已按预设对上 ' + presetHits + ' 列，下面可以逐项检查。'
+                  : '按这个预设只认出了 ' + Math.max(0, presetHits) + ' 列 —— 可能不是这份表，换一个预设或手动对列。')}
+            </div>
+          </div>
+        ) : null}
 
         {tables.length > 1 ? (
           <div className="field">

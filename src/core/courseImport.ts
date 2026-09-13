@@ -223,14 +223,26 @@ const SYNONYMS: Record<FieldKey, string[]> = {
   place: ['上课地点', '上课教室', '教室', '地点', '场地'],
 };
 
-function scoreHeader(cell: string, field: FieldKey): number {
+function scoreHeader(cell: string, field: FieldKey, extra?: Partial<Record<FieldKey, string[]>>): number {
   const c = norm(cell);
   if (!c) return 0;
-  const list = SYNONYMS[field];
-  for (let i = 0; i < list.length; i++) {
-    const syn = norm(list[i]);
-    if (c === syn) return 100 - i;          /* 完全相等最可信 */
-    if (c.indexOf(syn) >= 0) return 60 - i; /* 包含次之 */
+  /*
+   * 插件预设的写法排在**前面**：那是"这个学校的导出文件就是这么写的"，是确定的；
+   * 内置同义词是猜测。两者都命中同一列时，确定的那个应该赢。
+   */
+  const lists: string[][] = [];
+  const add = extra && extra[field];
+  if (add && add.length) lists.push(add);
+  lists.push(SYNONYMS[field]);
+  for (let li = 0; li < lists.length; li++) {
+    const list = lists[li];
+    const base = li === 0 ? 200 : 100;      /* 预设那组整体加权 */
+    for (let i = 0; i < list.length; i++) {
+      const syn = norm(list[i]);
+      if (!syn) continue;
+      if (c === syn) return base - i;          /* 完全相等最可信 */
+      if (c.indexOf(syn) >= 0) return base - 40 - i; /* 包含次之 */
+    }
   }
   return 0;
 }
@@ -250,16 +262,32 @@ export interface GuessResult {
  * 但很少超过 10 行。评分方式是"这一行能对上多少个字段"，全对不上就返回 -1，
  * 让用户自己指。
  */
-export function guessColumns(rows: string[][]): GuessResult {
+export function guessColumns(
+  rows: string[][],
+  /**
+   * 插件带来的**额外写法**（可选）。
+   *
+   * 一个学校一个写法，靠内置同义词永远追不完；而让插件提供"这份文件里表头长什么样"
+   * 是纯数据、可校验、也不需要任何权限 —— 见 plugins/types.ts 的 ImportCapability。
+   */
+  extra?: Partial<Record<FieldKey, string[]>>,
+  /** 插件声明"表头固定在这一行"时直接用它，不再逐行打分（0 基） */
+  fixedHeaderRow?: number
+): GuessResult {
   const scan = Math.min(rows.length, 10);
   let bestRow = 0;
   let bestScore = 0;
 
+  const forced = typeof fixedHeaderRow === 'number' && fixedHeaderRow >= 0 && fixedHeaderRow < rows.length
+    ? Math.round(fixedHeaderRow) : -1;
+  if (forced >= 0) bestRow = forced;
+
   for (let r = 0; r < scan; r++) {
+    if (forced >= 0 && r !== forced) continue;
     let score = 0;
     for (const f of FIELD_ORDER) {
       let colBest = 0;
-      for (const cell of rows[r]) colBest = Math.max(colBest, scoreHeader(cell, f));
+      for (const cell of rows[r]) colBest = Math.max(colBest, scoreHeader(cell, f, extra));
       score += colBest;
     }
     if (score > bestScore) { bestScore = score; bestRow = r; }
@@ -275,7 +303,7 @@ export function guessColumns(rows: string[][]): GuessResult {
     let best = 0;
     for (let c = 0; c < header.length; c++) {
       if (used.indexOf(c) >= 0) continue;
-      const s = scoreHeader(header[c], f);
+      const s = scoreHeader(header[c], f, extra);
       if (s > best) { best = s; bestCol = c; }
     }
     if (bestCol >= 0) { map[f] = bestCol; used.push(bestCol); }
@@ -283,7 +311,10 @@ export function guessColumns(rows: string[][]): GuessResult {
 
   const hits = FIELD_ORDER.filter(function (f) { return map[f] >= 0; }).length;
   /* 表头没猜中时把第一行当数据行更安全：宁可多导一行让用户看出来，也不要静默吃掉一门课 */
-  return { headerRow: bestScore > 0 ? bestRow : -1, map: map, header: header, hits: hits };
+  return {
+    headerRow: bestScore > 0 || forced >= 0 ? bestRow : -1,
+    map: map, header: header, hits: hits,
+  };
 }
 
 /* --------------------------- 单元格 → 一节课 --------------------------- */

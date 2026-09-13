@@ -6,6 +6,64 @@ import {
 import { buildEmptyData } from './demo';
 import type { TimetableData } from './types';
 
+describe('插件带来的表头写法（导入预设）', function () {
+  /** 一所"别的学校"的表头：内置同义词里一个都不认识 */
+  const ROWS = [
+    ['授课内容', '授课人', '节段', '授课周历', '授课场所'],
+    ['高等数学', '张三', '1-2', '1-16', 'A301'],
+  ];
+  const EXTRA = {
+    name: ['授课内容'], teacher: ['授课人'], period: ['节段'],
+    weeks: ['授课周历'], place: ['授课场所'],
+  };
+
+  it('不给预设时认不出来 —— 这些写法内置同义词里没有', function () {
+    const g = guessColumns(ROWS);
+    expect(g.map.name).toBe(-1);
+    expect(g.map.period).toBe(-1);
+  });
+
+  it('给了预设就能全对上', function () {
+    const g = guessColumns(ROWS, EXTRA);
+    expect(g.map.name).toBe(0);
+    expect(g.map.teacher).toBe(1);
+    expect(g.map.period).toBe(2);
+    expect(g.map.weeks).toBe(3);
+    expect(g.map.place).toBe(4);
+    expect(g.hits).toBe(5);
+  });
+
+  it('★ 预设与内置同义词同时命中时，以预设为准', function () {
+    /* "课程" 是内置认识的；预设说这一列叫"课程副标题" —— 两列都像，预设该赢 */
+    const rows = [
+      ['课程副标题', '课程'],
+      ['甲', '乙'],
+    ];
+    const g = guessColumns(rows, { name: ['课程副标题'] });
+    expect(g.map.name).toBe(0);
+  });
+
+  it('指定表头行时不再逐行打分（有的导出文件前面挂了好几行标题）', function () {
+    const rows = [
+      ['2026 春季学期 学生课表', '', ''],
+      ['课程名称', '星期', '节次'],
+      ['高等数学', '周一', '1-2'],
+    ];
+    /* 自动识别会自己找到第 2 行 */
+    expect(guessColumns(rows).headerRow).toBe(1);
+    /* 预设说"表头在第 1 行"就听预设的（第 1 行是标题行，于是这一行被当成表头 → 认不出列） */
+    const forced = guessColumns(rows, undefined, 0);
+    expect(forced.headerRow).toBe(0);
+    expect(forced.map.name).toBe(-1);
+  });
+
+  it('预设里的写法带空格/全角也没关系（走的是同一套归一化）', function () {
+    const g = guessColumns([['授 课 内 容', '节 段']], { name: ['授课内容'], period: ['节段'] });
+    expect(g.map.name).toBe(0);
+    expect(g.map.period).toBe(1);
+  });
+});
+
 describe('文本归一化', function () {
   it('全角转半角、去空白与装饰符', function () {
     expect(norm('  高等 数学（上） ')).toBe('高等数学上');

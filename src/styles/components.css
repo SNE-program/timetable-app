@@ -252,6 +252,8 @@ input[type="range"].rng::-moz-range-thumb { width: 12px; height: 12px; border-ra
 .chip.on { background: var(--c-accent); color: var(--c-on-accent); border-color: var(--c-accent); }
 .chip::after { content: ""; position: absolute; inset: -6px 0; }
 .chip-row { display: flex; flex-wrap: wrap; gap: 8px; padding: 11px 14px; }
+/* 能点的标签（导入弹层里的"这是哪个学校的表"）：指针与焦点都要像按钮 */
+.chip-row .chip[role="button"] { cursor: pointer; }
 .dot { width: 6px; height: 6px; border-radius: 50%; flex: 0 0 auto; }
 .dot.ok { background: #00B42A; }
 .dot.warn { background: #FF7D00; }

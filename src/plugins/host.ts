@@ -1,11 +1,12 @@
 import {
   CAPABILITY_PERMISSION, type Capability, type CommandCapability, type ExportCapability,
-  type InstalledPlugin, type PluginManifest, type PluginPermission, type SettingField,
-  type SettingsCapability,
+  type ImportCapability, type InstalledPlugin, type PluginManifest, type PluginPermission,
+  type SettingField, type SettingsCapability,
 } from './types';
+import type { FieldKey as ImportFieldKey } from '../core/courseImport';
 import { clearAllSettings, maxFields, maxOptions, maxTextLength, readSettings, resetSettings } from './settings';
 import { COLUMN_LABEL, SCOPE_COLUMNS, type ExportColumn, type ExportFormat, type ExportScope } from '../core/exporters';
-import { BUILTIN_PLUGINS } from './builtin';
+import { builtinPlugins } from './builtin';
 
 /**
  * 插件宿主。
@@ -151,7 +152,7 @@ export function validateManifest(raw: unknown): ParseResult {
   const outCaps: Capability[] = [];
   for (const c of caps) {
     const cap = c as Record<string, unknown>;
-    if (cap.type !== 'export' && cap.type !== 'command' && cap.type !== 'settings') {
+    if (cap.type !== 'export' && cap.type !== 'command' && cap.type !== 'settings' && cap.type !== 'import') {
       return { ok: false, error: '不支持的能力类型：' + String(cap.type) };
     }
     if (typeof cap.id !== 'string' || !cap.id) return { ok: false, error: '能力缺少 id' };
@@ -184,6 +185,59 @@ export function validateManifest(raw: unknown): ParseResult {
         hint: typeof cap.hint === 'string' ? cap.hint : undefined,
         action: { kind: 'export', capabilityId: act.capabilityId },
         keys: keys.length > 0 ? (keys as string[]) : undefined,
+      });
+      continue;
+    }
+
+    /* ---------------- 导入预设：这个学校导出来的表长什么样 ---------------- */
+    if (cap.type === 'import') {
+      const headersRaw = cap.headers && typeof cap.headers === 'object' && !Array.isArray(cap.headers)
+        ? cap.headers as Record<string, unknown> : {};
+      const headers: Partial<Record<ImportFieldKey, string[]>> = {};
+      let total = 0;
+      for (const key of Object.keys(headersRaw)) {
+        if (IMPORT_FIELDS.indexOf(key as ImportFieldKey) < 0) {
+          return { ok: false, error: '导入预设 ' + cap.id + ' 里有不认识的字段：' + key };
+        }
+        const list = headersRaw[key];
+        if (!Array.isArray(list)) return { ok: false, error: '导入预设 ' + cap.id + ' 的 ' + key + ' 应该是字符串数组' };
+        const clean: string[] = [];
+        for (const h of list) {
+          if (typeof h !== 'string' || !h.trim()) continue;
+          const t = h.trim().slice(0, 20);
+          /*
+           * 表头写成通配或超短词会把别的列抢走：一个字的表头（"课"）几乎必然误匹配 ——
+           * 而猜错一列就是整张课表全错。所以只收 2 个字以上、且不含通配符的写法。
+           */
+          if (t.length < 2) return { ok: false, error: '导入预设 ' + cap.id + ' 的表头「' + t + '」太短，至少要 2 个字' };
+          if (/[*?]/.test(t)) return { ok: false, error: '导入预设 ' + cap.id + ' 的表头不能包含 * 或 ?' };
+          if (clean.indexOf(t) >= 0) continue;
+          clean.push(t);
+        }
+        if (clean.length === 0) continue;
+        if (clean.length > 8) return { ok: false, error: '导入预设 ' + cap.id + ' 的「' + key + '」最多 8 种写法' };
+        headers[key as ImportFieldKey] = clean;
+        total += clean.length;
+      }
+      if (total === 0) return { ok: false, error: '导入预设 ' + cap.id + ' 至少要写一种表头写法' };
+      if (total > 40) return { ok: false, error: '导入预设 ' + cap.id + ' 的表头写法总数上限是 40 条' };
+
+      const hr = cap.headerRow;
+      if (hr !== undefined && (typeof hr !== 'number' || !isFinite(hr) || hr < 0 || hr > 20)) {
+        return { ok: false, error: '导入预设 ' + cap.id + ' 的 headerRow 应当是 0..20 的整数' };
+      }
+      const md = cap.mode;
+      if (md !== undefined && md !== 'long' && md !== 'matrix') {
+        return { ok: false, error: '导入预设 ' + cap.id + ' 的 mode 只能是 long 或 matrix' };
+      }
+      outCaps.push({
+        type: 'import',
+        id: cap.id,
+        name: cap.name,
+        hint: typeof cap.hint === 'string' ? cap.hint : undefined,
+        headers: headers,
+        headerRow: typeof hr === 'number' ? Math.round(hr) : undefined,
+        mode: md === 'long' || md === 'matrix' ? md : undefined,
       });
       continue;
     }
@@ -394,9 +448,10 @@ export function validateManifest(raw: unknown): ParseResult {
 /** 内置插件永远在列表里；用户的安装/停用/授权叠加上去 */
 export function listPlugins(): InstalledPlugin[] {
   const s = load();
-  const builtinIds = BUILTIN_PLUGINS.map(function (p) { return p.id; });
+  const builtins = builtinPlugins();
+  const builtinIds = builtins.map(function (p) { return p.id; });
 
-  const out: InstalledPlugin[] = BUILTIN_PLUGINS.map(function (m) {
+  const out: InstalledPlugin[] = builtins.map(function (m) {
     return {
       manifest: m,
       enabled: s.disabled.indexOf(m.id) < 0,
@@ -423,7 +478,7 @@ export function installPlugin(text: string, granted: PluginPermission[]): { ok: 
   if (!r.ok) return r;
 
   const s = load();
-  if (BUILTIN_PLUGINS.some(function (p) { return p.id === r.manifest.id; })) {
+  if (builtinPlugins().some(function (p) { return p.id === r.manifest.id; })) {
     return { ok: false, error: '这个 id 和内置插件冲突，换一个（比如加上作者前缀）' };
   }
   /* 同 id 覆盖安装：替换清单，但停用状态保留 */
@@ -528,6 +583,27 @@ export function activeCommands(): ActiveCommand[] {
   }
   return out;
 }
+
+export interface ActiveImport {
+  pluginId: string;
+  pluginName: string;
+  capability: ImportCapability;
+}
+
+/** 汇总已启用插件的导入预设（导入弹层里的"这是哪个学校的表"那一排） */
+export function activeImports(): ActiveImport[] {
+  const out: ActiveImport[] = [];
+  for (const p of listPlugins()) {
+    if (!isPluginActive(p)) continue;
+    for (const c of p.manifest.capabilities) {
+      if (c.type === 'import') out.push({ pluginId: p.manifest.id, pluginName: p.manifest.name, capability: c });
+    }
+  }
+  return out;
+}
+
+/** 导入预设认识的字段（校验用；与 core/courseImport 的 FIELD_ORDER 一致） */
+const IMPORT_FIELDS: ImportFieldKey[] = ['name', 'teacher', 'day', 'period', 'weeks', 'place'];
 
 /* ------------------------------ 设置：解析成"这次到底怎么做" ------------------------------ */
 

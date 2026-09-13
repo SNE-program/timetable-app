@@ -6,10 +6,11 @@ import { beforeEach, describe, expect, it } from 'vitest';
  * 类型闸门不能为了图方便放宽。
  */
 import EXAMPLE_PLUGIN from '../../examples/plugin-teacher-contact.tbplugin.json?raw';
+import EXAMPLE_IMPORT from '../../examples/plugin-jwc-import.tbplugin.json?raw';
 import {
-  HOST_API_VERSION, activeCommands, activeExports, grantPermissions, installPlugin, isPluginActive,
-  lastLoadIssues, listPlugins, parseManifest, resetPlugins, resolveExportColumns, resolveExportFileName,
-  setPluginEnabled, settingsCapability, uninstallPlugin,
+  HOST_API_VERSION, activeCommands, activeExports, activeImports, grantPermissions, installPlugin,
+  isPluginActive, lastLoadIssues, listPlugins, parseManifest, resetPlugins, resolveExportColumns,
+  resolveExportFileName, setPluginEnabled, settingsCapability, uninstallPlugin,
 } from './host';
 import { writeSetting } from './settings';
 
@@ -545,6 +546,68 @@ describe('插件设置能力', function () {
     expect(localStorage.getItem('timetable.pluginsettings.v1')).toContain('teacher');
     uninstallPlugin('test.hello');
     expect(localStorage.getItem('timetable.pluginsettings.v1')).not.toContain('teacher');
+  });
+});
+
+describe('导入预设', function () {
+  function importPkg(over: Record<string, unknown> = {}): string {
+    return pkg(Object.assign({
+      permissions: [],
+      capabilities: [Object.assign({
+        type: 'import', id: 'i1', name: '某校教务',
+        headers: { name: ['课程名称', '教学班名称'], day: ['上课星期'], period: ['起止节次'] },
+      }, over)],
+    }, {}));
+  }
+
+  it('合法的导入预设能装上，并且出现在导入弹层的预设里', function () {
+    expect(parseManifest(importPkg()).ok).toBe(true);
+    expect(installPlugin(importPkg(), []).ok).toBe(true);
+    const list = activeImports();
+    const mine = list.filter(function (x) { return x.pluginId === 'test.hello'; })[0];
+    expect(mine).toBeTruthy();
+    expect(mine.capability.headers.name).toEqual(['课程名称', '教学班名称']);
+  });
+
+  it('导入预设**不需要权限**（它只是表头写法，不碰数据）', function () {
+    expect(parseManifest(importPkg({ permissions: [] })).ok).toBe(true);
+  });
+
+  it('不认识的字段名、太短的表头、通配符都会被拒', function () {
+    expect(parseManifest(importPkg({ headers: { 课程: ['课程名称'] } })).ok).toBe(false);
+    expect(parseManifest(importPkg({ headers: { name: ['课'] } })).ok).toBe(false);
+    expect(parseManifest(importPkg({ headers: { name: ['课程*'] } })).ok).toBe(false);
+    expect(parseManifest(importPkg({ headers: {} })).ok).toBe(false);
+    expect(parseManifest(importPkg({ headers: { name: '课程名称' } })).ok).toBe(false);
+  });
+
+  it('headerRow 与 mode 的取值有范围', function () {
+    expect(parseManifest(importPkg({ headerRow: 2 })).ok).toBe(true);
+    expect(parseManifest(importPkg({ headerRow: -1 })).ok).toBe(false);
+    expect(parseManifest(importPkg({ headerRow: 99 })).ok).toBe(false);
+    expect(parseManifest(importPkg({ mode: 'weird' })).ok).toBe(false);
+    expect(parseManifest(importPkg({ mode: 'matrix' })).ok).toBe(true);
+  });
+
+  it('停用插件后预设立刻消失（与导出能力同一套过滤）', function () {
+    installPlugin(importPkg(), []);
+    expect(activeImports().some(function (x) { return x.pluginId === 'test.hello'; })).toBe(true);
+    setPluginEnabled('test.hello', false);
+    expect(activeImports().some(function (x) { return x.pluginId === 'test.hello'; })).toBe(false);
+  });
+
+  it('仓库里那份导入预设示例能真的装上（防止规范文档腐烂）', function () {
+    const r = parseManifest(EXAMPLE_IMPORT);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const caps = r.manifest.capabilities;
+    expect(caps.length).toBe(2);
+    const one = caps.filter(function (c) { return c.type === 'import' && c.id === 'matrix-xls'; })[0];
+    expect(one && one.type === 'import' ? one.mode : '').toBe('matrix');
+  });
+
+  it('检查用的内置预设只在 ?devplugin=import 时出现（生产不受影响）', function () {
+    expect(activeImports().some(function (x) { return x.pluginId === 'dev.import-preset'; })).toBe(false);
   });
 });
 

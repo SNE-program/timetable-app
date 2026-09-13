@@ -15,7 +15,7 @@ import type { PluginManifest } from './types';
  * 让内置的「当前周 CSV」吃自己那套设置能力（选列 + 文件名），
  * 于是"字段够不够表达真实需求""表单排得下吗"这类问题在发版前就暴露了。
  */
-export const BUILTIN_PLUGINS: PluginManifest[] = [
+const BUILTIN_PLUGINS: PluginManifest[] = [
   {
     format: 'timetable-plugin',
     version: 1,
@@ -122,3 +122,54 @@ export const BUILTIN_PLUGINS: PluginManifest[] = [
     ],
   },
 ];
+
+/**
+ * 检查用的内置插件：`?devplugin=import`。
+ *
+ * 导入预设这条路（"这是哪个学校导出来的表"）在无头浏览器里验不了 ——
+ * 无头环境装不了插件文件。所以这里造一个**故意对不上**的预设：
+ * 它认的是另一所学校的表头，用在内置样例表上应该明确地"只认出 0 列"，
+ * 于是"选错预设会不会被看出来"这件事变成可测的（见 diagnostics 的 ?importcheck=1）。
+ * 生产路径完全不受影响：不带参数时它不出现。
+ */
+function devPlugin(): PluginManifest | null {
+  let mode = '';
+  try { mode = new URLSearchParams(window.location.search).get('devplugin') || ''; } catch (e) { return null; }
+  if (mode !== 'import') return null;
+  return {
+    format: 'timetable-plugin',
+    version: 1,
+    apiVersion: 2,
+    id: 'dev.import-preset',
+    name: '检查用导入预设',
+    author: '检查',
+    pluginVersion: '1.0.0',
+    description: '另一所学校的表头写法，用来检查"选错预设会不会被看出来"。',
+    permissions: [],
+    capabilities: [
+      {
+        type: 'import',
+        id: 'other-school',
+        name: '另一所学校（检查用）',
+        hint: '表头是「教学班名称 / 上课星期 / 起止节次」这一套',
+        headers: {
+          name: ['教学班名称'],
+          day: ['上课星期'],
+          period: ['起止节次'],
+        },
+        headerRow: 0,
+      },
+    ],
+  };
+}
+
+/**
+ * 内置插件列表。
+ *
+ * 走函数而不是直接导出常量，是为了让检查用的那条（`?devplugin=`）能挂进来，
+ * 而**生产路径一行都不受影响**。
+ */
+export function builtinPlugins(): PluginManifest[] {
+  const dev = devPlugin();
+  return dev ? BUILTIN_PLUGINS.concat([dev]) : BUILTIN_PLUGINS.slice();
+}
