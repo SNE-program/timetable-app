@@ -70,6 +70,8 @@ APK 里的 Web 产物云配置为空，于是云备份、云端角色、右上�
 | --- | --- |
 | 版本 | versionCode **63** / versionName **1.9.2** |
 | 主要改动 | `.github/workflows/android.yml`、`src/platform/widget.ts`（含测试）、`src/mascot/motion.ts`（重写）、`src/app/reminderRuntime.ts`、`src/app/App.tsx`、`src/app/diagnostics.ts`、`android/.../widget/*.java`、AndroidManifest |
+| Android | `课表助手-v1.9.2.apk` · 9.23 MB（9,684,675 字节）· SHA-256 `4CF1632E20BF53639F16C713532535FD2D4CEAA1C28FD69475C943477C6445A2` · 由 tag `v1.9.2` 触发的 CI 构建 · 与前几版同一张证书 |
+| 关键验收 | 把线上那份 APK 拆开查过：`assets/public/assets/*.js` 里**能查到云端域名** —— 这就是「安卓版没有云端入口」修好了的直接证据 |
 
 ---
 
