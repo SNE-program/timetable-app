@@ -2,7 +2,9 @@ import {
   canRedo, canUndo, closeSheets, getState, openAdd, openChangelog, openHistory, openManual, openMascotCenter,
   openSearch, openShortcutSheet, openTask, redo, setTab, setWeek, undo,
 } from './store';
-import { registerCommands, type Command } from './commands';
+import { registerCommands, unregisterCommandsByPrefix, type Command } from './commands';
+import type { ActiveCommand } from '../plugins/host';
+import { availableCommands, runPluginExport } from './store';
 import { TABS } from './tabs';
 
 /**
@@ -81,6 +83,8 @@ export function installBuiltinCommands(): void {
   });
 
   registerCommands(list);
+  /* 内置的先注册，插件的一律排在后面 —— 键位冲突时内置赢 */
+  reloadPluginCommands();
 }
 
 /** 弹层开着的时候不让 ←→ / 数字 / t 抢键：用户以为在弹层里操作，结果课表翻页了 */
@@ -96,3 +100,34 @@ function anySheetOpen(): boolean {
 
 /** 快捷键说明：一个普通弹层，开关与其他弹层一样在 store 里 */
 function openShortcuts(): void { openShortcutSheet(); }
+
+/* ------------------------------ 插件命令 ------------------------------ */
+
+/**
+ * 把**已启用插件**声明的命令注册进命令表。
+ *
+ * 这是插件系统里第一个"零代码但仍然能出现在界面上"的扩展点：
+ * 插件声明一条命令，它会自动出现在「快捷键」页，并能绑默认键位；
+ * 而命令的动作只能是"执行本插件的某个导出能力" —— 插件依然执行不了任何自己的代码。
+ *
+ * 注册规则：
+ *   - 内置命令先注册，所以**插件抢不到内置键位**（匹配是精确的，先注册的赢）；
+ *   - 每次重载先清掉上一批插件命令，避免卸载/停用之后还留着失效条目；
+ *   - 插件命令一律放在「插件」分组里，界面上能和内置的分开看。
+ */
+export function reloadPluginCommands(): void {
+  unregisterCommandsByPrefix('plugin:');
+  let list: ActiveCommand[] = [];
+  try { list = availableCommands(); } catch (e) { list = []; }
+  registerCommands(list.map(function (c) {
+    const cap = c.command;
+    return {
+      id: 'plugin:' + c.pluginId + ':' + cap.id,
+      title: cap.name,
+      group: '插件',
+      keys: cap.keys,
+      hint: (cap.hint ? cap.hint + ' · ' : '') + '来自插件「' + c.pluginName + '」',
+      run: function () { void runPluginExport(c.pluginId, cap.action.capabilityId); },
+    };
+  }));
+}

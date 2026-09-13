@@ -7,8 +7,8 @@ import { beforeEach, describe, expect, it } from 'vitest';
  */
 import EXAMPLE_PLUGIN from '../../examples/plugin-teacher-contact.tbplugin.json?raw';
 import {
-  activeExports, grantPermissions, installPlugin, isPluginActive, listPlugins,
-  parseManifest, resetPlugins, setPluginEnabled, uninstallPlugin,
+  HOST_API_VERSION, activeCommands, activeExports, grantPermissions, installPlugin, isPluginActive,
+  lastLoadIssues, listPlugins, parseManifest, resetPlugins, setPluginEnabled, uninstallPlugin,
 } from './host';
 
 /* Node 里没有 localStorage，用 Map 顶一个最小实现 */
@@ -201,5 +201,133 @@ describe('插件宿主', function () {
       expect(['csv', 'markdown']).toContain(e.capability.format);
       expect(['week', 'term', 'courses']).toContain(e.capability.scope);
     }
+  });
+});
+/* =========================== v1.9.6：接口版本、复校验、命令 =========================== */
+
+/*
+ * 这一批用例对应审查里查出的问题：
+ *   1. 存起来的清单在读取时没有复校验 —— 篡改或旧版残留可以绕过安装期的那些规则；
+ *   2. 清单里没有接口版本，应用升级之后「按新版写的插件」会以莫名其妙的方式失败；
+ *   3. 插件除了导出菜单里一行字之外，没有任何能被用户主动触发的东西（现在有了命令）。
+ */
+
+describe('插件接口版本', function () {
+  function pack(over: Record<string, unknown>): string {
+    return JSON.stringify(Object.assign({
+      format: 'timetable-plugin', version: 1, id: 'test.api', name: '测试',
+      permissions: ['read:timetable'],
+      capabilities: [{ type: 'export', id: 'e1', name: 'CSV', format: 'csv', scope: 'week', columns: ['course'] }],
+    }, over));
+  }
+
+  it('不写 apiVersion 视为 1，能装', function () {
+    const r = parseManifest(pack({}));
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.manifest.apiVersion).toBe(1);
+  });
+
+  it('比宿主新的接口版本直接拒，并说清为什么', function () {
+    const r = parseManifest(pack({ apiVersion: HOST_API_VERSION + 1, id: 'test.future' }));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain('更新版本的应用');
+  });
+
+  it('apiVersion 不是正整数就拒', function () {
+    for (const bad of [0, -1, '1']) {
+      expect(parseManifest(pack({ apiVersion: bad, id: 'test.bad' })).ok).toBe(false);
+    }
+  });
+
+  it('minAppVersion 只做格式校验（版本比较留给界面）', function () {
+    expect(parseManifest(pack({ minAppVersion: '1.10.0', id: 'test.min' })).ok).toBe(true);
+    expect(parseManifest(pack({ minAppVersion: '最新版', id: 'test.min2' })).ok).toBe(false);
+  });
+});
+
+describe('读取时复校验', function () {
+  it('被篡改的已装清单在读出来时被丢掉，并记一条原因', function () {
+    localStorage.setItem('timetable.plugins.v1', JSON.stringify({
+      installed: [{ format: 'timetable-plugin', version: 1, id: 'evil', name: '坏的', permissions: [], capabilities: [] }],
+      disabled: [], granted: {},
+    }));
+    expect(listPlugins().some(function (p) { return p.manifest.id === 'evil'; })).toBe(false);
+    expect(lastLoadIssues().length).toBeGreaterThan(0);
+  });
+
+  it('正常清单读出来仍然有效', function () {
+    localStorage.setItem('timetable.plugins.v1', JSON.stringify({
+      installed: [{
+        format: 'timetable-plugin', version: 1, id: 'test.good', name: '好的',
+        permissions: ['read:timetable'],
+        capabilities: [{ type: 'export', id: 'e1', name: 'CSV', format: 'csv', scope: 'week', columns: ['course'] }],
+      }],
+      disabled: [], granted: { 'test.good': ['read:timetable'] },
+    }));
+    const hit = listPlugins().filter(function (p) { return p.manifest.id === 'test.good'; })[0];
+    expect(hit).toBeTruthy();
+    expect(isPluginActive(hit)).toBe(true);
+  });
+});
+
+describe('命令能力', function () {
+  function withCommand(cmd: Record<string, unknown>): string {
+    return JSON.stringify({
+      format: 'timetable-plugin', version: 1, id: 'test.cmd', name: '命令插件',
+      permissions: ['read:timetable'],
+      capabilities: [
+        { type: 'export', id: 'e1', name: 'CSV', format: 'csv', scope: 'week', columns: ['course'] },
+        cmd,
+      ],
+    });
+  }
+
+  it('合法命令通过，键位原样保留', function () {
+    const r = parseManifest(withCommand({ type: 'command', id: 'c1', name: '导出本周', action: { kind: 'export', capabilityId: 'e1' }, keys: ['mod+shift+e'] }));
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      const c = r.manifest.capabilities[1];
+      expect(c.type).toBe('command');
+      if (c.type === 'command') expect(c.keys).toEqual(['mod+shift+e']);
+    }
+  });
+
+  it('动作指向不存在的能力 → 拒（否则就是点不动的菜单项）', function () {
+    const r = parseManifest(withCommand({ type: 'command', id: 'c1', name: 'x', action: { kind: 'export', capabilityId: 'nope' } }));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain('不存在');
+  });
+
+  it('动作类型只允许 export —— 塞一段代码进来是不行的', function () {
+    const r = parseManifest(withCommand({ type: 'command', id: 'c1', name: 'x', action: { kind: 'eval', code: 'alert(1)' } }));
+    expect(r.ok).toBe(false);
+  });
+
+  it('键位写法不对就拒（免得把命令表搞坏）', function () {
+    const r = parseManifest(withCommand({ type: 'command', id: 'c1', name: 'x', action: { kind: 'export', capabilityId: 'e1' }, keys: ['Ctrl+Shift+E'] }));
+    expect(r.ok).toBe(false);
+  });
+
+  it('命令本身也要声明权限', function () {
+    const text = JSON.stringify({
+      format: 'timetable-plugin', version: 1, id: 'test.cmd2', name: 'x',
+      permissions: [],
+      capabilities: [
+        { type: 'export', id: 'e1', name: 'CSV', format: 'csv', scope: 'week', columns: ['course'] },
+        { type: 'command', id: 'c1', name: '导出', action: { kind: 'export', capabilityId: 'e1' } },
+      ],
+    });
+    expect(parseManifest(text).ok).toBe(false);
+  });
+
+  it('停用或撤权之后命令立刻从 activeCommands 里消失', function () {
+    const text = withCommand({ type: 'command', id: 'c1', name: '导出本周', action: { kind: 'export', capabilityId: 'e1' } });
+    expect(installPlugin(text, ['read:timetable']).ok).toBe(true);
+    expect(activeCommands().some(function (c) { return c.pluginId === 'test.cmd'; })).toBe(true);
+    grantPermissions('test.cmd', []);
+    expect(activeCommands().some(function (c) { return c.pluginId === 'test.cmd'; })).toBe(false);
+    grantPermissions('test.cmd', ['read:timetable']);
+    setPluginEnabled('test.cmd', false);
+    expect(activeCommands().some(function (c) { return c.pluginId === 'test.cmd'; })).toBe(false);
   });
 });

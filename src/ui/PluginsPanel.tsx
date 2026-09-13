@@ -2,9 +2,12 @@ import React from 'react';
 import { Panel } from './common';
 import { showToast } from '../app/store';
 import {
-  grantPermissions, installPlugin, listPlugins, setPluginEnabled, uninstallPlugin,
+  HOST_API_VERSION, grantPermissions, installPlugin, lastLoadIssues, listPlugins, parseManifest,
+  setPluginEnabled, uninstallPlugin,
 } from '../plugins/host';
 import { PERMISSION_LABEL, type InstalledPlugin, type PluginPermission } from '../plugins/types';
+import { APP_VERSION } from '../app/version';
+import { reloadPluginCommands } from '../app/builtinCommands';
 
 /**
  * 插件管理。
@@ -17,11 +20,26 @@ export default function PluginsPanel() {
   const [busy, setBusy] = React.useState(false);
   const fileRef = React.useRef<HTMLInputElement>(null);
   const list = listPlugins();
+  /* 读取时被丢掉的畸形记录（篡改、旧版残留）—— 读取时是复校验的，这里如实告诉用户 */
+  const issues = React.useMemo(function () { return lastLoadIssues(); }, [tick]);
 
   function refresh(): void { setTick(tick + 1); }
 
+  /** 版本号比较：'1.10' > '1.9'（按段比数字，不做字符串比较） */
+  function compareVersion(a: string, b: string): number {
+    const pa = a.split('.').map(function (x) { return Number(x) || 0; });
+    const pb = b.split('.').map(function (x) { return Number(x) || 0; });
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+      const d = (pa[i] || 0) - (pb[i] || 0);
+      if (d !== 0) return d < 0 ? -1 : 1;
+    }
+    return 0;
+  }
+
   function toggleEnabled(p: InstalledPlugin): void {
     setPluginEnabled(p.manifest.id, !p.enabled);
+    /* 停用/启用会改变"这个插件提供哪些命令"，命令表要跟着重算 */
+    reloadPluginCommands();
     refresh();
   }
 
@@ -31,6 +49,8 @@ export default function PluginsPanel() {
       ? p.granted.filter(function (x) { return x !== perm; })
       : p.granted.concat([perm]);
     grantPermissions(p.manifest.id, next);
+    /* 撤权之后这个插件的命令不该再能被触发 */
+    reloadPluginCommands();
     refresh();
   }
 
@@ -38,12 +58,26 @@ export default function PluginsPanel() {
     setBusy(true);
     try {
       const text = await file.text();
-      /* 先干跑一遍校验，好把"这个插件要读你的课表"提前告诉用户 */
-      const probe = installPlugin(text, []);
+      /*
+       * 先**只校验不安装**。
+       *
+       * 这里原来调的是 installPlugin(text, []) —— 名字叫"干跑"，其实是真安装：
+       * 它已经把插件写进 localStorage 了，后面那句"装不上"只对校验失败的情况成立。
+       * 于是用户点了一次、界面上什么都没说，重启之后却多出一个插件。
+       * 现在改用 parseManifest：纯函数、不碰存储。
+       */
+      const probe = parseManifest(text);
       if (!probe.ok) { showToast('装不上：' + probe.error, 'error'); return; }
-      const granted: PluginPermission[] = ['read:timetable'];
-      installPlugin(text, granted);
-      showToast('已安装插件，默认已授权读取课表（可在下面关掉）', 'ok');
+      /*
+       * 默认**不授予任何权限**。
+       *
+       * 原来这里写死 granted = ['read:timetable']，与插件契约里"默认未授予、勾了才生效"
+       * 的说法直接矛盾 —— 用户以为自己在控制权限，其实装上的那一刻就已经放行了。
+       * 现在装上是"已安装但未生效"，下面权限那一行勾上才开始工作。
+       */
+      const r = installPlugin(text, []);
+      if (!r.ok) { showToast('装不上：' + r.error, 'error'); return; }
+      showToast('已安装「' + probe.manifest.name + '」。它还不能读取课表 —— 在下面勾上权限才会生效', 'ok');
       refresh();
     } finally {
       setBusy(false);
@@ -73,8 +107,18 @@ export default function PluginsPanel() {
               {p.manifest.author ? p.manifest.author + ' · ' : ''}
               {p.manifest.capabilities.length} 项能力
               {p.manifest.pluginVersion ? ' · v' + p.manifest.pluginVersion : ''}
+              {' · 接口 v' + (p.manifest.apiVersion || 1)}
               {!active && p.enabled ? ' · 权限未授予，暂不生效' : ''}
             </div>
+            {/*
+              最低应用版本：插件声明它需要多新的应用。
+              不满足时**明说**而不是让它装上去表现异常 —— 那种"装了但列不对"最难查。
+            */}
+            {p.manifest.minAppVersion && compareVersion(APP_VERSION, p.manifest.minAppVersion) < 0 ? (
+              <div className="plugin-desc" style={{ color: 'var(--c-danger)' }}>
+                这个插件要求应用版本 ≥ {p.manifest.minAppVersion}，当前是 {APP_VERSION || '未知'} —— 升级应用后再用。
+              </div>
+            ) : null}
 
             {p.manifest.permissions.length > 0 ? (
               <div className="plugin-perms">
@@ -103,6 +147,7 @@ export default function PluginsPanel() {
                 className="btn sm ghost plugin-remove"
                 onClick={function () {
                   uninstallPlugin(p.manifest.id);
+                  reloadPluginCommands();
                   showToast('已卸载「' + p.manifest.name + '」', 'ok');
                   refresh();
                 }}
@@ -126,10 +171,17 @@ export default function PluginsPanel() {
         />
       </div>
 
+      {issues.length > 0 ? (
+        <div className="panel-desc" style={{ color: 'var(--c-danger)' }}>
+          有 {issues.length} 条插件记录读不出来（已跳过）：{issues.slice(0, 2).join('；')}
+          {issues.length > 2 ? ' 等' : ''}
+        </div>
+      ) : null}
+
       <div className="panel-desc" style={{ paddingTop: 4 }}>
         插件包是一个 <b>.json</b> 文件，开头写着 <code>format: "timetable-plugin"</code>。
-        这个版本不支持执行第三方代码 —— 那需要真正的沙箱，而不是在主进程里 eval，
-        是另一个量级的工程。
+        当前支持的<b>插件接口是 v{HOST_API_VERSION}</b> —— 按更新接口写的插件装不上（会明确说原因）。
+        这个版本不支持执行第三方代码：那需要真正的沙箱，而不是在主进程里 eval，是另一个量级的工程。
       </div>
     </Panel>
   );

@@ -1,6 +1,6 @@
 import React from 'react';
 import {
-  confirmDanger, setNotifyStatus, showToast, storageUsage, useApp, type StorageUsage,
+  clearPluginData, confirmDanger, setNotifyStatus, showToast, storageUsage, useApp, type StorageUsage,
 } from '../app/store';
 import { clearFiredLog } from '../app/reminderRuntime';
 import { getNotifier } from '../platform';
@@ -72,8 +72,24 @@ function StorageRows() {
           );
         })
       )}
+      {/*
+        插件数据以前既不在这个清单里、也没有任何入口能清掉：装过插件之后
+        那些记录会一直留着（备份文件里又不含它们，换设备也带不走）。
+        现在它出现在上面的清单里，清理入口就在这里。
+      */}
+      <div className="check-actions" style={{ borderTop: 0, paddingTop: 4 }}>
+        <button className="btn sm ghost" onClick={function () { void clearPlugins(); }}>清掉插件数据</button>
+      </div>
     </div>
   );
+
+  async function clearPlugins(): Promise<void> {
+    const ok = await confirmDanger(
+      '清掉全部插件数据？安装记录、停用状态与授权都会没，内置的导出格式不受影响。',
+      '清掉'
+    );
+    if (ok) clearPluginData();
+  }
 }
 
 export default function DebugSection(props: { n: NotifierStatus | null; rel: ReliabilityInfo | null }) {

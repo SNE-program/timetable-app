@@ -26,7 +26,8 @@ import { parseThemeFile, themeFileText, validateTheme } from '../theme/themeFile
 import { announceChange } from './reminderRuntime';
 import { deleteAsset, getAsset, kvDelete, kvGetSync, kvSet, putAsset } from '../storage';
 import { extractAssets, hydrateAssets } from '../storage/assetRef';
-import { activeExports, type ActiveExport } from '../plugins/host';
+import { activeCommands, activeExports, resetPlugins, type ActiveCommand, type ActiveExport } from '../plugins/host';
+import { reloadPluginCommands } from './builtinCommands';
 import {
   courseRows, currentWeek, exportFileName, termRows, toCsv, toGroupedMarkdown, toMarkdown, weekRows,
   type ExportColumn,
@@ -82,6 +83,8 @@ export interface Prefs {
   privacySeen: boolean;
   /** 启动时自动检查更新（默认开；只是读一个静态文件，可在设置里关掉） */
   autoCheckUpdate: boolean;
+  /** 上一次清掉插件数据的时刻（0 = 从没清过）。设置页拿它显示一句"清掉于 …" */
+  pluginDataAt?: number;
   /**
    * 打开应用时自动登录（默认开）。
    * 关掉之后：本次仍然登录着，**下次打开需要重新输入密码** —— 登录状态不会被恢复。
@@ -2996,6 +2999,33 @@ function saveText(text: string, filename: string, mime: string, title: string): 
   return saveTextFile({ fileName: filename, text: text, mime: mime, title: title });
 }
 
+/* ------------------------------ 插件（命令与清理） ------------------------------ */
+
+/** 已启用插件的命令（可以出现在命令表 / 快捷键页里的那些） */
+export function availableCommands(): ActiveCommand[] {
+  try { return activeCommands(); } catch (e) { return []; }
+}
+
+/**
+ * 清掉全部插件数据（安装记录、停用状态、授权）。
+ *
+ * 原来 resetPlugins 只有测试在调 —— 用户装了一堆插件之后**没有任何地方能清掉**，
+ * 备份文件里也不含插件（它只带课表/外观/偏好），所以换设备之后那些记录既没用又占地方。
+ * 现在它挂在存储体检查的清理里，并且明说会清掉什么。
+ */
+export function clearPluginData(): void {
+  resetPlugins();
+  reloadPluginCommands();
+  patchPrefs({ pluginDataAt: Date.now() });
+  showToast('已清掉插件数据：安装记录、停用状态与授权都没了（内置导出格式不受影响）', 'ok');
+}
+
+/** 插件数据有没有被清过（设置页据此显示"清掉于 …"） */
+export function pluginDataClearedAt(): number {
+  const v = (state.prefs as unknown as { pluginDataAt?: number }).pluginDataAt;
+  return typeof v === 'number' ? v : 0;
+}
+
 export function openExport(): void { setState({ exportSheet: true }); }
 export function openImportSheet(): void { setState({ importSheet: true }); }
 /** 打开说明书；给 section 就顺带跳到对应章节（角色面板的「怎么做角色包」用得上） */
@@ -3089,6 +3119,10 @@ export function storageUsage(): { items: StorageUsage[]; total: number; limit: n
     [KEY_PREFS, '偏好设置'],
     ['timetable.notiflog.v1', '提醒发送记录'],
     ['timetable.devicecheck.v1', '检查进度'],
+    /* 插件注册表：装过插件才会占地方，但用户以前既看不到也清不掉 */
+    ['timetable.plugins.v1', '插件'],
+    /* 插件注册表：装过插件才会占地方，但用户以前既看不到也清不掉 */
+    ['timetable.plugins.v1', '插件'],
   ];
   const items: StorageUsage[] = [];
   let total = 0;

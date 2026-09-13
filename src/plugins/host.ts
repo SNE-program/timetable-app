@@ -1,6 +1,6 @@
 import {
-  CAPABILITY_PERMISSION, type Capability, type ExportCapability, type InstalledPlugin,
-  type PluginManifest, type PluginPermission,
+  CAPABILITY_PERMISSION, type Capability, type CommandCapability, type ExportCapability,
+  type InstalledPlugin, type PluginManifest, type PluginPermission,
 } from './types';
 import { COLUMN_LABEL, type ExportColumn } from '../core/exporters';
 import { BUILTIN_PLUGINS } from './builtin';
@@ -13,6 +13,14 @@ import { BUILTIN_PLUGINS } from './builtin';
  */
 
 const KEY = 'timetable.plugins.v1';
+
+/**
+ * 宿主支持的插件接口版本。
+ *
+ * 加一条新的能力类型、或改动已有能力的含义时，把它 +1 ——
+ * 于是一份"按新版写的"插件不会装进旧版应用里（装进去只会表现得莫名其妙）。
+ */
+export const HOST_API_VERSION = 1;
 
 interface Stored {
   /** 非内置插件 */
@@ -27,13 +35,35 @@ function emptyStore(): Stored {
   return { installed: [], disabled: [], granted: {} };
 }
 
+/** 上一次读取时被丢掉的问题记录（界面用它告诉用户"有几个插件记录读不出来"） */
+let loadIssues: string[] = [];
+
+export function lastLoadIssues(): string[] { return loadIssues.slice(); }
+
 function load(): Stored {
+  loadIssues = [];
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return emptyStore();
     const p = JSON.parse(raw) as Partial<Stored>;
+    /*
+     * 存进去的清单要**按安装时的同一套规则重新校验一遍**。
+     *
+     * 安装时校验过不等于以后一直可信：localStorage 可以被改，
+     * 旧版本应用写入的清单也可能不符合今天的规则。不复查的话，
+     * 一条畸形清单会一路进到导出菜单里 —— 表现是空表头或整页崩，
+     * 而用户完全不知道是哪个插件干的。
+     */
+    const installed: PluginManifest[] = [];
+    const rawList = Array.isArray(p.installed) ? p.installed : [];
+    for (const item of rawList) {
+      const r = validateManifest(item);
+      if (r.ok) installed.push(r.manifest);
+      else loadIssues.push((item && typeof item === 'object' && typeof (item as { id?: unknown }).id === 'string'
+        ? String((item as { id: unknown }).id) : '（没有 id）') + '：' + r.error);
+    }
     return {
-      installed: Array.isArray(p.installed) ? p.installed : [],
+      installed: installed,
       disabled: Array.isArray(p.disabled) ? p.disabled : [],
       granted: p.granted && typeof p.granted === 'object' ? p.granted as Record<string, PluginPermission[]> : {},
     };
@@ -69,6 +99,15 @@ export function parseManifest(text: string): ParseResult {
   } catch (e) {
     return { ok: false, error: '不是合法的 JSON：' + (e as Error).message };
   }
+  return validateManifest(raw);
+}
+
+/**
+ * 校验一份**已经解析好的**清单对象。
+ *
+ * 拆出来是为了 `load()` 能对存起来的清单跑同一套规则 —— 见那边的说明。
+ */
+export function validateManifest(raw: unknown): ParseResult {
   if (!raw || typeof raw !== 'object') return { ok: false, error: '插件包应该是一个 JSON 对象' };
   const m = raw as Record<string, unknown>;
 
@@ -78,6 +117,21 @@ export function parseManifest(text: string): ParseResult {
     return { ok: false, error: 'id 只能由字母、数字、点、下划线、短横线组成（2-64 位）' };
   }
   if (typeof m.name !== 'string' || !m.name.trim()) return { ok: false, error: '缺少 name' };
+
+  /*
+   * 接口版本：不写按 1 算。比宿主新的插件直接拒 ——
+   * 它对能力的期望宿主还没实现，装进去只会表现得莫名其妙。
+   */
+  const api = m.apiVersion === undefined ? 1 : m.apiVersion;
+  if (typeof api !== 'number' || !isFinite(api) || api < 1) {
+    return { ok: false, error: 'apiVersion 必须是正整数' };
+  }
+  if (api > HOST_API_VERSION) {
+    return { ok: false, error: '这个插件需要更新版本的应用（它按插件接口 v' + api + ' 写，当前支持到 v' + HOST_API_VERSION + '）' };
+  }
+  if (m.minAppVersion !== undefined && (typeof m.minAppVersion !== 'string' || !/^[0-9]+(\.[0-9]+){0,2}$/.test(m.minAppVersion))) {
+    return { ok: false, error: 'minAppVersion 应该形如 1.10 或 1.10.0' };
+  }
 
   const perms = Array.isArray(m.permissions) ? m.permissions : [];
   for (const p of perms) {
@@ -92,11 +146,43 @@ export function parseManifest(text: string): ParseResult {
   const outCaps: Capability[] = [];
   for (const c of caps) {
     const cap = c as Record<string, unknown>;
-    if (cap.type !== 'export') return { ok: false, error: '不支持的能力类型：' + String(cap.type) };
+    if (cap.type !== 'export' && cap.type !== 'command') {
+      return { ok: false, error: '不支持的能力类型：' + String(cap.type) };
+    }
     if (typeof cap.id !== 'string' || !cap.id) return { ok: false, error: '能力缺少 id' };
     if (seen.has(cap.id)) return { ok: false, error: '能力 id 重复：' + cap.id };
     seen.add(cap.id);
     if (typeof cap.name !== 'string' || !cap.name.trim()) return { ok: false, error: '能力 ' + cap.id + ' 缺少 name' };
+
+    /* 命令：动作只能指向本插件自己的某个能力，且必须在下面第二轮里核对 */
+    if (cap.type === 'command') {
+      const act = cap.action as Record<string, unknown> | undefined;
+      if (!act || act.kind !== 'export') {
+        return { ok: false, error: '命令 ' + cap.id + ' 的 action.kind 目前只能是 export' };
+      }
+      if (typeof act.capabilityId !== 'string' || !act.capabilityId) {
+        return { ok: false, error: '命令 ' + cap.id + ' 缺少 action.capabilityId' };
+      }
+      if (perms.indexOf(CAPABILITY_PERMISSION.command) < 0) {
+        return { ok: false, error: '命令 ' + cap.id + ' 需要声明权限 "' + CAPABILITY_PERMISSION.command + '"' };
+      }
+      const keys = Array.isArray(cap.keys) ? cap.keys : [];
+      for (const k of keys) {
+        if (typeof k !== 'string' || !/^(mod\+)?(shift\+)?(alt\+)?[a-z0-9/\[\].;,=-]+$/.test(k)) {
+          return { ok: false, error: '命令 ' + cap.id + ' 的键位写法不对：' + String(k) };
+        }
+      }
+      outCaps.push({
+        type: 'command',
+        id: cap.id,
+        name: cap.name,
+        hint: typeof cap.hint === 'string' ? cap.hint : undefined,
+        action: { kind: 'export', capabilityId: act.capabilityId },
+        keys: keys.length > 0 ? (keys as string[]) : undefined,
+      });
+      continue;
+    }
+
     if (cap.format !== 'csv' && cap.format !== 'markdown') {
       return { ok: false, error: '能力 ' + cap.id + ' 的 format 只能是 csv 或 markdown' };
     }
@@ -128,11 +214,25 @@ export function parseManifest(text: string): ParseResult {
     });
   }
 
+  /* 第二轮：命令指向的导出能力必须真的存在（否则它会变成一个点了没反应的菜单项） */
+  for (const c of outCaps) {
+    if (c.type !== 'command') continue;
+    const target = outCaps.filter(function (x) { return x.id === c.action.capabilityId; })[0];
+    if (!target) {
+      return { ok: false, error: '命令 ' + c.id + ' 指向的能力不存在：' + c.action.capabilityId };
+    }
+    if (target.type !== 'export') {
+      return { ok: false, error: '命令 ' + c.id + ' 只能指向导出能力（' + c.action.capabilityId + ' 不是）' };
+    }
+  }
+
   return {
     ok: true,
     manifest: {
       format: 'timetable-plugin',
       version: 1,
+      apiVersion: api,
+      minAppVersion: typeof m.minAppVersion === 'string' ? m.minAppVersion : undefined,
       id: m.id,
       name: m.name,
       author: typeof m.author === 'string' ? m.author : undefined,
@@ -237,6 +337,32 @@ export function activeExports(): ActiveExport[] {
     for (const c of p.manifest.capabilities) {
       if (c.type === 'export') {
         out.push({ pluginId: p.manifest.id, pluginName: p.manifest.name, capability: c });
+      }
+    }
+  }
+  return out;
+}
+
+export interface ActiveCommand {
+  pluginId: string;
+  pluginName: string;
+  command: CommandCapability;
+}
+
+/**
+ * 汇总已启用插件的命令（可以绑快捷键的那些）。
+ *
+ * 与 activeExports 同一套过滤条件：停用或撤权之后命令立刻消失。
+ * 注册进命令表由 app/builtinCommands.ts 的 reloadPluginCommands() 负责 ——
+ * 宿主保持"不知道界面"，界面也不直接读 localStorage。
+ */
+export function activeCommands(): ActiveCommand[] {
+  const out: ActiveCommand[] = [];
+  for (const p of listPlugins()) {
+    if (!isPluginActive(p)) continue;
+    for (const c of p.manifest.capabilities) {
+      if (c.type === 'command') {
+        out.push({ pluginId: p.manifest.id, pluginName: p.manifest.name, command: c });
       }
     }
   }

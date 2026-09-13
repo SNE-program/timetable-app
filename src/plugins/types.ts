@@ -23,8 +23,17 @@ import type { ExportColumn } from '../core/exporters';
  * 加沙箱，而不是在主上下文里 eval —— 那是另一个量级的工程。
  */
 
-/** 目前只开放一类能力；接口留成联合类型，加新能力时不用改调用方 */
-export type CapabilityType = 'export';
+/**
+ * 目前开放两类能力；接口是联合类型，加新能力时不用改调用方。
+ *
+ *   export  —— 导出一种格式（列 + 范围都是声明式的）
+ *   command —— 在应用里注册一条**命令**（可以绑快捷键），动作只能是调用本插件的某个能力
+ *
+ * 命令这一类的意义：它是"插件能出现在界面上、能被用户主动触发"的最小入口。
+ * 没有它，插件就只是导出菜单里的一行字 —— 用户根本感知不到装过什么。
+ * 而它仍然是**零代码**的：命令只是把已有动作包一层，插件无法借它执行任何新逻辑。
+ */
+export type CapabilityType = 'export' | 'command';
 
 export interface ExportCapability {
   type: 'export';
@@ -47,7 +56,22 @@ export interface ExportCapability {
   grouped?: boolean;
 }
 
-export type Capability = ExportCapability;
+export interface CommandCapability {
+  type: 'command';
+  /** 插件内唯一（与其它能力同一个命名空间） */
+  id: string;
+  name: string;
+  hint?: string;
+  /**
+   * 这条命令做什么。**只允许指向本插件已声明的能力** ——
+   * 写成一个受限的联合类型，将来就算加新动作，也必须先在宿主里实现好。
+   */
+  action: { kind: 'export'; capabilityId: string };
+  /** 建议的默认键位（形如 'mod+shift+e'）。与内置键位冲突时以内置为准，插件不会抢到键 */
+  keys?: string[];
+}
+
+export type Capability = ExportCapability | CommandCapability;
 
 export type PluginPermission = 'read:timetable';
 
@@ -58,12 +82,24 @@ export const PERMISSION_LABEL: Record<PluginPermission, string> = {
 /** 哪种能力需要哪个权限 */
 export const CAPABILITY_PERMISSION: Record<CapabilityType, PluginPermission> = {
   export: 'read:timetable',
+  /* 命令目前只能触发导出，读的同样是课表内容 */
+  command: 'read:timetable',
 };
 
 export interface PluginManifest {
   /** 固定字符串，用来确认这确实是一个课表插件包 */
   format: 'timetable-plugin';
   version: 1;
+  /**
+   * 插件是按哪一版**宿主接口**写的。
+   *
+   * 不写视为 1（最早的版本）。宿主只接受 <= 自己支持的最高版本：
+   * 比宿主新的插件一律装不上 —— 这比"装上之后列错位、导出空表"好得多，
+   * 后者用户根本看不出是版本不匹配。应用将来加能力时把这个数字往上加。
+   */
+  apiVersion?: number;
+  /** 最低要求的主程序版本（如 '1.10.0'）。宿主只做格式校验，比较在界面上做 */
+  minAppVersion?: string;
   /** 反向域名风格，安装时用它去重与覆盖 */
   id: string;
   name: string;

@@ -13,7 +13,7 @@
  * 它会自动出现在这一页并可以绑键位，而插件本身仍然不执行任何代码（见 docs/10）。
  */
 
-export type CommandGroup = '基础' | '导航' | '课表' | '帮助';
+export type CommandGroup = '基础' | '导航' | '课表' | '插件' | '帮助';
 
 export interface Command {
   /** 稳定 id（插件注册时用来去重） */
@@ -60,7 +60,7 @@ export function runCommand(id: string): boolean {
 }
 
 /** 这一页里显示成几组（分组顺序固定，免得每次渲染顺序都在跳） */
-export const COMMAND_GROUPS: CommandGroup[] = ['基础', '导航', '课表', '帮助'];
+export const COMMAND_GROUPS: CommandGroup[] = ['基础', '导航', '课表', '插件', '帮助'];
 
 /**
  * 一次按键事件 → 键位串。
@@ -124,6 +124,23 @@ export function isTextField(el: EventTarget | null): boolean {
   if (!t) return false;
   const tag = t.tagName;
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t.isContentEditable === true;
+}
+
+/**
+ * 按 id 前缀注销一批命令（插件卸载 / 停用 / 改权限之后要重算）。
+ *
+ * 只能删"后注册"的：内置命令永远不动 —— 插件的重载不该影响应用自己那一套键位。
+ */
+export function unregisterCommandsByPrefix(prefix: string): number {
+  let n = 0;
+  for (let i = table.length - 1; i >= 0; i--) {
+    if (table[i].id.indexOf(prefix) === 0) {
+      used.delete(table[i].id);
+      table.splice(i, 1);
+      n++;
+    }
+  }
+  return n;
 }
 
 /** 仅供测试与热重载：清空命令表 */
