@@ -157,11 +157,13 @@ export default function TodayView() {
             const c = item.c;
             const cc = courseColor(palette, e.colorIndex);
             const past = e.endMinutes <= nowMin;
-            /* 这一节如果被调过，找出那条调整 —— 用于就地恢复 */
-            const ov = (data.overrides || []).filter(function (o) {
-              return o.sessionId === e.sessionId && o.date === e.date;
-            })[0];
-            const overrideId = ov ? ov.id : '';
+            /*
+             * 这一节如果被调过，就地给出「恢复这一次」。
+             * 调整记录的 id 就在事件里（引擎把 modifiedBy 填成那条 override 的 id）——
+             * 不要自己按 (sessionId, date) 去找：补课这类调整的原日期与出现日期不同，
+             * 那样找会在"补到今天"的那一节上找不到记录，按钮就不出现了。
+             */
+            const overrideId = e.modifiedBy || '';
             const isNow = e.startMinutes <= nowMin && nowMin < e.endMinutes;
             let cls = 'tl-item';
             if (past) cls += ' past';

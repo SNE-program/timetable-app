@@ -144,7 +144,13 @@ export function pushRedo(set: ChangeSet): void {
   redoStack.push(set);
 }
 
-/** 清空全部历史（导入、重置这类「换了一份数据」的场景） */
+/**
+ * 清空全部历史。
+ *
+ * 现在产品里没有调用点 —— 导入课表、从云端恢复都是一笔普通的可撤销操作，
+ * 撤销能把它们原样退回去，所以不该再把历史切断。留着它是给测试夹具用，
+ * 以及将来真出现「换了一份数据、旧历史再也对不上」的场景时有个明确的出口。
+ */
 export function resetHistory(): void {
   undoStack = [];
   redoStack = [];

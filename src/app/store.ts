@@ -848,9 +848,10 @@ function writeData(data: TimetableData, label?: string): void {
 /**
  * 改课表的唯一入口。
  *
- * `label` 给了才记历史 —— 有意义的用户操作都要给，
- * 像考勤打卡、任务勾选这种高频低风险的动作则刻意不记，
- * 免得撤销栈里塞满噪音，真正想撤的那一步反而找不着。
+ * `label` 给了才记历史 —— 有意义的用户操作都要给。
+ * 高频低风险的动作（考勤打卡、任务勾选）也给 label，但**不带提示条**、
+ * 并传 `coalesceKey` 让同一个目标的连续改动合并成一步：
+ * 既不会把撤销栈塞满噪音，也不至于"想撤却撤不了"。
  */
 export function setData(
   data: TimetableData, label?: string, source: ChangeSource = 'user', coalesceKey?: string

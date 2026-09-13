@@ -51,7 +51,8 @@ interface ChangeSet { id; label; source; at; before; after; coalesceKey? }
 
 **④ 可逆的边界**
 
-可逆：课表增删改、调课 / 停课 / 换教室、考勤、任务、导入（课表 / 日历 / 表格）、外观与偏好。
+可逆：课表增删改、调课 / 停课 / 换教室、考勤、任务、导入（课表 / 日历 / 表格）、外观（主题 / 主色 / 圆角 / 模糊 / 字号 / 壁纸）。
+设置里的开关本身不进历史（再点一次就回去了）；整份文档级的操作（云端恢复 / 导入备份）会把偏好一起记进那一笔。
 不可逆（说明书里写明）：删除云端备份、注销账号、上传角色、卸载或清除应用数据。
 
 **⑤ 验证**
@@ -62,7 +63,14 @@ interface ChangeSet { id; label; source; at; before; after; coalesceKey? }
 
 **⑥ 交付**
 
-待构建完成后补：APK 体积 / SHA-256、线上地址。
+- 版本：**1.9.4 / versionCode 65**（`package.json` 与 `android/app/build.gradle` 一致，CI 第 3 步校验）
+- 单测 561 通过 / 32 个文件；`tsc --noEmit` 0 错误
+- APK：**9,690,743 字节**，SHA-256 `61CC1711B6DC26856C4E23E0361F016347050CD0C55615326D29E78A0293D802`
+  （Supabase 主地址与 GitHub 备选逐个下载核对，两份逐字节一致）
+- 自检：`?histcheck=3` 量到历史面板 4 行、最宽行右边缘 488/504 无溢出；
+  `?ovcheck=1` 真点一次「恢复」，核对调整记录 4 → 3、历史栈 1 → 2；
+  320 / 360 / 390 三档布局扫描 OVERFLOW 0 / SMALL_TAP 0 / CLIPPED 0
+- 线上：网页版 https://timble.bond/ 已是 1.9.4（`latest.json` 同步），下载页 https://timble.bond/download/ 已换成本版校验值
 
 ---
 ## v1.9.3

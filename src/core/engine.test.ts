@@ -221,6 +221,12 @@ describe('Override 处理', function () {
     expect(evs.length).toBe(1);
     expect(evs[0].periodStart).toBe(5);
     expect(evs[0].start).toBe('14:00');
+    /*
+     * modifiedBy 必须是那条调整记录的 id。
+     * 今日页就地给出的「恢复这一次」直接用它 —— 不自己按 (sessionId, date) 反查，
+     * 因为"补到今天"的那一节，出现日期与原日期并不相同，反查会漏。
+     */
+    expect(evs[0].modifiedBy).toBe('o1');
   });
   it('补课到另一天：原日期不再出现，新日期出现', function () {
     const dt = data({
@@ -232,6 +238,7 @@ describe('Override 处理', function () {
     expect(moved.length).toBe(1);
     expect(moved[0].periodStart).toBe(3);
     expect(moved[0].dayOfWeek).toBe(6);
+    expect(moved[0].modifiedBy).toBe('o1');
   });
   it('改到本周另一天', function () {
     const dt = data({
