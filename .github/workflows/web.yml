@@ -7,6 +7,9 @@ on:
     paths:
       - 'src/**'
       - 'index.html'
+      # 下载页与它的静态资源也在 Pages 上 —— 只改 public/ 时同样要重新发布，
+      # 否则会出现"下载页写着旧版本号"这种最容易被当成发版失败的错（实测踩到过一次）
+      - 'public/**'
       - 'vite.config.ts'
       - 'package.json'
       - 'package-lock.json'
